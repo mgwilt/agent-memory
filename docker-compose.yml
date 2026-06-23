@@ -1,0 +1,49 @@
+services:
+  memgraph:
+    image: memgraph/memgraph:latest
+    command:
+      - "--also-log-to-stderr=true"
+      - "--schema-info-enabled=true"
+      - "--metrics-format=OpenMetrics"
+      - "--metrics-port=9091"
+      - "--storage-properties-on-edges=true"
+      - "--log-level=INFO"
+    ports:
+      - "7687:7687"
+      - "9091:9091"
+    volumes:
+      - memgraph-data:/var/lib/memgraph
+      - memgraph-log:/var/log/memgraph
+      - ./crates/actr-store/migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'RETURN 1;' | mgconsole >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      memgraph:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles:
+      - dashboards
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  memgraph-data:
+  memgraph-log:
+  grafana-storage:
