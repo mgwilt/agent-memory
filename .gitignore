@@ -42,6 +42,8 @@ flamegraph.svg
 *.db
 *.sqlite
 /test-results/
+/artifacts/
+node_modules/
 
 # Secrets and machine-local config.
 .env

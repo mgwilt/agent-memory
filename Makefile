@@ -1,4 +1,4 @@
-.PHONY: fmt check clippy test verify
+.PHONY: fmt check clippy test e2e-agentic verify
 
 fmt:
 	cargo fmt --all
@@ -11,5 +11,8 @@ clippy:
 
 test:
 	cargo test --workspace
+
+e2e-agentic:
+	pnpm e2e:agentic
 
 verify: fmt check clippy test
