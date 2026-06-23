@@ -221,5 +221,5 @@ docker compose down -v
 ## Codex Goals
 
 Implementation is organized as repository-local goal packages under
-`.codex/goals/`, matching the G01-G12 plan in
+`.codex/goals/`, matching the adopted G01-G11 plan in
 `research/ACT-R-Engineering-Plan.md`.

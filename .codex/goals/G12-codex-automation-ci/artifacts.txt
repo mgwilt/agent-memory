@@ -1,3 +1,0 @@
-.codex/goals
-.github/workflows/ci.yml
-AGENTS.md

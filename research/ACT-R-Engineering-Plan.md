@@ -365,8 +365,7 @@ The official Codex materials reviewed for this report do **not** describe a nati
 - difficult tasks should start with a **plan**;
 - plans should be broken into **milestones**;
 - Codex can be driven by **AGENTS.md** and repository-local conventions;
-- non-interactive runs can emit **JSON Lines** and **schema-constrained outputs**;
-- GitHub Actions can run **repeatable Codex tasks** and gate CI with Codex-driven checks. citeturn15view1turn15view0turn14view5turn35view2turn35view3
+- non-interactive runs can emit **JSON Lines** and **schema-constrained outputs**. citeturn15view1turn15view0turn14view5turn35view2turn35view3
 
 Accordingly, the right way to implement “Codex Goals” for this project is as a **repository convention**. Each goal should live under `.codex/goals/<nn>-<slug>/` and contain:
 
@@ -393,9 +392,9 @@ artifacts:
   - tests/integration/retrieval_pipeline.rs
 ```
 
-This convention maps cleanly onto current Codex capabilities. Plan mode can be used before implementation. Milestones can be delegated one by one. `codex exec --json` can stream machine-readable execution events, and `--output-schema` can force a stable final summary that CI can validate. GitHub Action integration can then run or review these goals as repeatable workflow steps. citeturn15view1turn15view0turn35view2turn35view3turn35view0
+This convention maps cleanly onto current Codex capabilities. Plan mode can be used before implementation. Milestones can be delegated one by one. `codex exec --json` can stream machine-readable execution events, and `--output-schema` can force a stable final summary for local review. citeturn15view1turn15view0turn35view2turn35view3turn35view0
 
-A small but important operational detail: Codex automation should always run inside a **Git repository**, and OpenAI explicitly warns against exposing `OPENAI_API_KEY` or `CODEX_API_KEY` broadly in CI jobs that execute repository-controlled code. Secret exposure must be scoped to the single Codex invocation or isolated action step. citeturn35view1turn35view5
+If future CI-based agent runs are reconsidered, treat them as a separate security review. Do not expose `OPENAI_API_KEY` or `CODEX_API_KEY` broadly in CI jobs that execute repository-controlled code. citeturn35view1turn35view5
 
 ## Deliverable B numbered Codex build plan
 
@@ -414,7 +413,6 @@ The dependency graph for the goals is:
 | G09 | G03, G04, G05, G06, G07, G08 |
 | G10 | G02, G08, G09 |
 | G11 | G08, G09, G10 |
-| G12 | G01–G11 |
 
 ### 1. G01 repository scaffold and agent contract
 
@@ -641,28 +639,6 @@ Done when: cargo test passes, integration tests run against Memgraph, and benchm
 **Verification:** `docker build`, `docker compose up`, demo script passes.
 
 **CI integration:** tagged builds publish image artifact and run a smoke test.
-
-### 12. G12 Codex automation and CI loop
-
-**Complexity:** M
-
-**Inputs:** G01–G11
-
-**Outputs:** `.codex/goals/*`, prompt files, output schemas, verification scripts, GitHub Actions wiring for Codex review and optional autofix
-
-**Example Codex prompt:**
-```text
-Goal: Add Codex-native automation for this repository.
-Context: Create goal folders, prompt files, JSON output schemas, verify.sh scripts, and GitHub Actions that can run review and selected non-interactive Codex tasks.
-Constraints: Keep API keys scoped to the Codex step only; do not expose secrets to arbitrary repo code; use machine-readable output.
-Done when: a workflow can run a Codex review, capture final output to an artifact, and a non-interactive local command can execute one goal with --json and --output-schema.
-```
-
-**Acceptance criteria:** `codex exec --json ... --output-schema ...` works for at least one goal locally; GitHub Action posts or uploads Codex output; prompt files are reviewed into the repo.
-
-**Verification:** run one local goal and one CI workflow in dry-run/review mode.
-
-**CI integration:** use Codex GitHub Action for repeatable review tasks or `codex exec` in non-interactive mode; prefer trusted triggers and explicit allowlists; scope credentials to the Codex step only. citeturn35view2turn35view3turn35view1turn35view5
 
 ### Reusable prompt templates for Codex
 
