@@ -24,6 +24,7 @@ CREATE INDEX ON :Chunk(last_access_at) WITH CONFIG {"order": "DESC"};
 CREATE INDEX ON :SlotValue(tenant_id, key, value_hash);
 CREATE INDEX ON :PracticeEvent(event_id);
 CREATE INDEX ON :PracticeEvent(agent_id, ts) WITH CONFIG {"order": "DESC"};
+CREATE INDEX ON :PracticeEvent(agent_id, chunk_id, occurred_at_ms) WITH CONFIG {"order": "DESC"};
 CREATE INDEX ON :ProductionRule(enabled, utility) WITH CONFIG {"order": "DESC"};
 CREATE INDEX ON :ProductionRule(agent_id, rule_id);
 CREATE EDGE INDEX ON :ASSOCIATED(strength);

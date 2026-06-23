@@ -10,6 +10,10 @@ pub enum BufferName {
 }
 
 impl BufferName {
+    pub fn core() -> [Self; 4] {
+        [Self::Goal, Self::Retrieval, Self::Imaginal, Self::Task]
+    }
+
     pub fn as_str(&self) -> &str {
         match self {
             Self::Goal => "goal",
@@ -49,6 +53,14 @@ impl BufferState {
         self.chunk_id = None;
         self.chunk_type = None;
         self.updated_at_ms = now_ms;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.chunk_id.is_none() && self.chunk_type.is_none()
+    }
+
+    pub fn snapshot(&self) -> BufferSnapshot {
+        BufferSnapshot::from(self)
     }
 }
 

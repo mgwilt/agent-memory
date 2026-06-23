@@ -404,10 +404,14 @@ pub fn exact_slot_match_score(candidate: &Chunk, requested: &[Slot], mismatch_pe
     requested
         .iter()
         .map(|slot| match candidate.slot(&slot.key) {
-            Some(value) if value == &slot.value => 0.0,
+            Some(value) if slot_values_match(value, &slot.value) => 0.0,
             Some(_) | None => -mismatch_penalty.max(0.0),
         })
         .sum()
+}
+
+fn slot_values_match(left: &SlotValue, right: &SlotValue) -> bool {
+    left.value_type() == right.value_type() && left.normalized() == right.normalized()
 }
 
 #[cfg(test)]
@@ -520,6 +524,23 @@ mod tests {
         let requested = [Slot::new("topic", SlotValue::Symbol("act-r".to_string()))];
 
         assert_eq!(exact_slot_match_score(&chunk, &requested, 0.5), -0.5);
+    }
+
+    #[test]
+    fn exact_partial_matching_uses_normalized_typed_values() {
+        let chunk = Chunk::new(
+            AgentId("agent".to_string()),
+            ChunkId("ck".to_string()),
+            ChunkType("episodic".to_string()),
+            0,
+        )
+        .with_slot("topic", SlotValue::Symbol("act-r".to_string()));
+        let requested = [Slot::new(
+            "topic",
+            SlotValue::Symbol("  ACT-R  ".to_string()),
+        )];
+
+        assert_eq!(exact_slot_match_score(&chunk, &requested, 0.5), 0.0);
     }
 
     #[test]
