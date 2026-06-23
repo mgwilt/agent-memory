@@ -348,13 +348,8 @@ pub fn slot_similarity(requested: &SlotValue, candidate: &SlotValue) -> f64 {
             let denominator = left.abs().max(right.abs()).max(1.0);
             -((left - right).abs() / denominator).min(1.0)
         }
-        (SlotValue::Bool(left), SlotValue::Bool(right)) => {
-            if left == right {
-                0.0
-            } else {
-                -1.0
-            }
-        }
+        (SlotValue::Bool(left), SlotValue::Bool(right)) if left == right => 0.0,
+        (SlotValue::Bool(_), SlotValue::Bool(_)) => -1.0,
         _ => -1.0,
     }
 }
