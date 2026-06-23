@@ -24,7 +24,9 @@ Place unit tests beside the code they verify and broader scenarios under `tests/
 
 ## Commit & Pull Request Guidelines
 
-There is no existing commit history, so use clear imperative commit subjects such as `Add retrieval buffer tests` or `Wire Memgraph bootstrap`. Keep each commit focused. Pull requests should include a short problem/solution summary, linked issue or goal ID when relevant, test evidence, and notes for schema, API, or operational changes. Include screenshots only for UI or dashboard changes.
+Use Conventional Commits for every commit subject: `<type>(<scope>): <description>`. Keep the description imperative, lower-case unless it starts with a proper noun, and under 72 characters when practical. Prefer scopes that match crates or repository areas, such as `core`, `session`, `rules`, `store`, `api`, `ops`, `docs`, `ci`, or `runtime`. Common types are `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`, `build`, and `perf`; use `!` plus a body footer for breaking changes.
+
+Keep each commit focused. Examples: `feat(rules): add retrieval condition matching`, `fix(store): bound candidate queries`, `docs: update Memgraph runbook`, and `ci: add workspace verification`. Pull requests should include a short problem/solution summary, linked issue or goal ID when relevant, test evidence, and notes for schema, API, or operational changes. Include screenshots only for UI or dashboard changes.
 
 ## Security & Configuration Tips
 
