@@ -22,6 +22,11 @@ actr-ops = { path = "crates/actr-ops" }
 actr-rules = { path = "crates/actr-rules" }
 actr-session = { path = "crates/actr-session" }
 actr-store = { path = "crates/actr-store" }
+axum = "0.8.4"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+tokio = { version = "1.45.1", features = ["macros", "net", "rt-multi-thread"] }
+tower = { version = "0.5.2", features = ["util"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

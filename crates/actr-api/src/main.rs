@@ -1,7 +1,18 @@
-use actr_api::route_manifest;
+use actr_api::{route_manifest_text, serve};
+use actr_ops::RuntimeConfig;
+use std::io::IsTerminal;
 
-fn main() {
-    for route in route_manifest() {
-        println!("{} {} - {}", route.method, route.path, route.purpose);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let manifest_requested = std::env::args().any(|arg| arg == "manifest");
+    let serve_requested = std::env::args().any(|arg| arg == "serve")
+        || std::env::var("ACTR_API_SERVE").is_ok_and(|value| value == "1")
+        || (!manifest_requested && std::io::stdout().is_terminal());
+
+    if serve_requested {
+        serve(RuntimeConfig::from_env()?).await
+    } else {
+        println!("{}", route_manifest_text());
+        Ok(())
     }
 }

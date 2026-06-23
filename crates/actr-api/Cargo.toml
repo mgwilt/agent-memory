@@ -7,7 +7,15 @@ rust-version.workspace = true
 
 [dependencies]
 actr-core.workspace = true
+actr-ops.workspace = true
 actr-rules.workspace = true
+actr-session.workspace = true
+actr-store.workspace = true
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tower.workspace = true
 
 [lints]
 workspace = true
