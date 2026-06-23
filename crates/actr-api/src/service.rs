@@ -8,6 +8,7 @@ use std::{
 };
 
 use actr_core::{AgentId, Chunk, ChunkId, MemoryError, MemoryResult, PracticeEvent, Slot};
+use actr_ops::MetricSample;
 use actr_rules::{RuleEngine, RuleId};
 use actr_session::{BufferName, BufferSnapshot, SessionRegistry};
 use actr_store::{
@@ -312,7 +313,11 @@ impl MemoryRepository for ApiRepository {
 pub struct ApiCounters {
     retrieval_hits: AtomicU64,
     retrieval_misses: AtomicU64,
+    session_lock_contention: AtomicU64,
     write_conflicts: AtomicU64,
+    last_retrieve_latency_us: AtomicU64,
+    last_candidates_examined: AtomicU64,
+    last_activation_compute_us: AtomicU64,
 }
 
 impl ApiCounters {
@@ -322,6 +327,31 @@ impl ApiCounters {
 
     pub fn record_retrieval_miss(&self) {
         self.retrieval_misses.fetch_add(1, AtomicOrdering::Relaxed);
+    }
+
+    pub fn record_retrieval_observation(
+        &self,
+        latency_ms: f64,
+        candidates_examined: usize,
+        activation_compute_ms: f64,
+    ) {
+        self.last_retrieve_latency_us.store(
+            milliseconds_to_microseconds(latency_ms),
+            AtomicOrdering::Relaxed,
+        );
+        self.last_candidates_examined.store(
+            u64::try_from(candidates_examined).unwrap_or(u64::MAX),
+            AtomicOrdering::Relaxed,
+        );
+        self.last_activation_compute_us.store(
+            milliseconds_to_microseconds(activation_compute_ms),
+            AtomicOrdering::Relaxed,
+        );
+    }
+
+    pub fn record_session_lock_contention(&self) {
+        self.session_lock_contention
+            .fetch_add(1, AtomicOrdering::Relaxed);
     }
 
     pub fn record_write_conflict(&self) {
@@ -336,8 +366,60 @@ impl ApiCounters {
         self.retrieval_misses.load(AtomicOrdering::Relaxed)
     }
 
+    pub fn retrieve_latency_ms(&self) -> f64 {
+        microseconds_to_milliseconds(self.last_retrieve_latency_us.load(AtomicOrdering::Relaxed))
+    }
+
+    pub fn candidates_examined(&self) -> u64 {
+        self.last_candidates_examined.load(AtomicOrdering::Relaxed)
+    }
+
+    pub fn activation_compute_ms(&self) -> f64 {
+        microseconds_to_milliseconds(
+            self.last_activation_compute_us
+                .load(AtomicOrdering::Relaxed),
+        )
+    }
+
+    pub fn session_lock_contention(&self) -> u64 {
+        self.session_lock_contention.load(AtomicOrdering::Relaxed)
+    }
+
     pub fn write_conflicts(&self) -> u64 {
         self.write_conflicts.load(AtomicOrdering::Relaxed)
+    }
+
+    pub fn metric_samples(&self) -> Vec<MetricSample> {
+        vec![
+            MetricSample {
+                name: "actr_memory_retrieve_latency_ms",
+                value: self.retrieve_latency_ms(),
+            },
+            MetricSample {
+                name: "actr_memory_candidates_examined",
+                value: self.candidates_examined() as f64,
+            },
+            MetricSample {
+                name: "actr_memory_activation_compute_ms",
+                value: self.activation_compute_ms(),
+            },
+            MetricSample {
+                name: "actr_memory_retrieval_hits_total",
+                value: self.retrieval_hits() as f64,
+            },
+            MetricSample {
+                name: "actr_memory_retrieval_misses_total",
+                value: self.retrieval_misses() as f64,
+            },
+            MetricSample {
+                name: "actr_memory_session_lock_contention_total",
+                value: self.session_lock_contention() as f64,
+            },
+            MetricSample {
+                name: "actr_memory_write_conflicts_total",
+                value: self.write_conflicts() as f64,
+            },
+        ]
     }
 }
 
@@ -390,4 +472,19 @@ fn normalized_cue_match_count(chunk: &Chunk, cues: &[Slot]) -> usize {
             })
         })
         .count()
+}
+
+fn milliseconds_to_microseconds(value: f64) -> u64 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0;
+    }
+    let max_milliseconds = u64::MAX as f64 / 1_000.0;
+    if value >= max_milliseconds {
+        return u64::MAX;
+    }
+    (value * 1_000.0).round() as u64
+}
+
+fn microseconds_to_milliseconds(value: u64) -> f64 {
+    value as f64 / 1_000.0
 }

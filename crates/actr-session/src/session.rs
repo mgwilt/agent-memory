@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError};
 
 use actr_core::{AgentId, ChunkId, ChunkType, MemoryError, MemoryResult};
 
@@ -86,6 +86,12 @@ pub struct SessionRegistry {
     sessions: Mutex<BTreeMap<AgentId, Arc<Mutex<SessionState>>>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservedSessionMutation<T> {
+    pub output: T,
+    pub contended: bool,
+}
+
 impl SessionRegistry {
     pub fn get_or_create(&self, agent_id: AgentId) -> MemoryResult<Arc<Mutex<SessionState>>> {
         let mut sessions = self
@@ -103,11 +109,38 @@ impl SessionRegistry {
         agent_id: AgentId,
         mutate: impl FnOnce(&mut SessionState) -> MemoryResult<T>,
     ) -> MemoryResult<T> {
+        self.with_session_observed(agent_id, mutate)
+            .map(|observed| observed.output)
+    }
+
+    pub fn with_session_observed<T>(
+        &self,
+        agent_id: AgentId,
+        mutate: impl FnOnce(&mut SessionState) -> MemoryResult<T>,
+    ) -> MemoryResult<ObservedSessionMutation<T>> {
         let session = self.get_or_create(agent_id)?;
-        let mut session = session
-            .lock()
-            .map_err(|_| MemoryError::Conflict("session lock poisoned".to_string()))?;
-        mutate(&mut session)
+        match session.try_lock() {
+            Ok(mut session) => {
+                let output = mutate(&mut session)?;
+                Ok(ObservedSessionMutation {
+                    output,
+                    contended: false,
+                })
+            }
+            Err(TryLockError::WouldBlock) => {
+                let mut session = session
+                    .lock()
+                    .map_err(|_| MemoryError::Conflict("session lock poisoned".to_string()))?;
+                let output = mutate(&mut session)?;
+                Ok(ObservedSessionMutation {
+                    output,
+                    contended: true,
+                })
+            }
+            Err(TryLockError::Poisoned(_)) => {
+                Err(MemoryError::Conflict("session lock poisoned".to_string()))
+            }
+        }
     }
 
     pub fn snapshot(&self, agent_id: AgentId) -> MemoryResult<Vec<BufferSnapshot>> {
@@ -252,6 +285,19 @@ mod tests {
                 .len(),
             4
         );
+    }
+
+    #[test]
+    fn observed_session_mutation_reports_uncontended_access() -> MemoryResult<()> {
+        let registry = SessionRegistry::default();
+
+        let observed = registry.with_session_observed(AgentId::from("agent"), |session| {
+            Ok(session.cognitive_step())
+        })?;
+
+        assert!(!observed.contended);
+        assert_eq!(observed.output, 0);
+        Ok(())
     }
 
     #[test]

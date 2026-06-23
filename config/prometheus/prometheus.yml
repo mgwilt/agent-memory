@@ -2,12 +2,15 @@ global:
   scrape_interval: 15s
 
 scrape_configs:
+  # Memgraph emits OpenMetrics on its private Compose service address.
+  # The host port is bound to 127.0.0.1 for local development only.
   - job_name: memgraph
     metrics_path: /metrics
     static_configs:
       - targets:
           - memgraph:9091
 
+  # The Rust API exposes Prometheus text at /metrics when run on the host.
   - job_name: actr-memory
     metrics_path: /metrics
     static_configs:

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use actr_core::{
     ActivationInput, ActivationOutput, ActivationParams, AgentId, Chunk, ChunkId, MemoryError,
     MemoryResult, PartialMatchingParams, Slot, SlotSimilarity, deterministic_noise,
@@ -164,6 +166,7 @@ pub struct RetrievalDiagnostics {
     pub context_chunk_count: usize,
     pub deterministic_seed: Option<u64>,
     pub threshold: f64,
+    pub activation_compute_ms: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -186,7 +189,9 @@ pub fn retrieve_chunk<R: MemoryRepository>(
     query.validate()?;
     let normalized_cue_slots = query.normalized_cue_slots();
     let candidates = repository.fetch_candidates(query)?;
+    let activation_started = Instant::now();
     let ranked_candidates = rank_retrieval_candidates(candidates, &request);
+    let activation_compute_ms = activation_started.elapsed().as_secs_f64() * 1_000.0;
     let diagnostics = RetrievalDiagnostics {
         candidates_examined: ranked_candidates.len(),
         candidate_limit: request.candidate_limit,
@@ -194,6 +199,7 @@ pub fn retrieve_chunk<R: MemoryRepository>(
         context_chunk_count: request.context_chunk_ids.len(),
         deterministic_seed: request.deterministic_seed,
         threshold: request.activation_params.retrieval_threshold,
+        activation_compute_ms,
     };
 
     let Some(best) = ranked_candidates.first() else {

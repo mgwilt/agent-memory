@@ -19,6 +19,57 @@ Memgraph owns:
 - production rule metadata and utility summaries;
 - schema introspection and operational metrics.
 
+## Runtime Profiles
+
+The Rust service loads `RuntimeConfig` from environment variables and validates
+it before binding the API listener. `ACTR_PROFILE` accepts `development`,
+`staging`, or `production`:
+
+- `development` binds the API to `127.0.0.1:8080`, uses local Bolt at
+  `bolt://127.0.0.1:7687`, and leaves Memgraph credentials optional for local
+  development.
+- `staging` binds on `0.0.0.0:8080`, uses a private `bolt+s://` Memgraph URI,
+  enables TLS, and requires a credential source.
+- `production` uses the staging hardening defaults, disables deterministic
+  runtime seeding, rejects loopback Memgraph URIs, and requires TLS plus a
+  credential source.
+
+Common overrides are `ACTR_API_BIND_ADDR`, `ACTR_MEMGRAPH_URI`,
+`ACTR_MEMGRAPH_USER`, `ACTR_CANDIDATE_LIMIT`, `ACTR_RETRIEVAL_THRESHOLD`, and
+`ACTR_DETERMINISTIC_SEED`. TLS is controlled with
+`ACTR_MEMGRAPH_TLS_ENABLED`, `ACTR_MEMGRAPH_TLS_CA_FILE`, and
+`ACTR_MEMGRAPH_TLS_SERVER_NAME`.
+
+## Observability
+
+The Rust API exposes Prometheus text exposition at `/metrics`. The service
+metrics include retrieval hits and misses, last retrieval latency, last
+candidate count, last activation-compute duration, session-lock contention, and
+write conflicts. Prometheus scrapes the API through the `actr-memory` job in
+`config/prometheus/prometheus.yml`.
+
+Memgraph is started with `--metrics-format=OpenMetrics` and
+`--metrics-port=9091`. Prometheus scrapes it inside the Compose network at
+`memgraph:9091`, while the host mapping is bound to `127.0.0.1:9091` for local
+development only. The Bolt port follows the same local-only host binding.
+
+## TLS And Credentials
+
+Do not commit Memgraph passwords, client certificates, private keys, generated
+CA material, or local `.env` files. Runtime credentials should be supplied by
+the deployment environment through one of these sources:
+
+- `ACTR_MEMGRAPH_PASSWORD`: a secret value provided by the process environment.
+- `ACTR_MEMGRAPH_PASSWORD_ENV`: the name of an environment variable that will
+  contain the secret.
+- `ACTR_MEMGRAPH_PASSWORD_FILE`: a path mounted from a secret manager, such as
+  `/run/secrets/memgraph-password`.
+
+Production deployments should use a private `bolt+s://` Memgraph endpoint,
+enable `ACTR_MEMGRAPH_TLS_ENABLED=true`, set
+`ACTR_MEMGRAPH_TLS_SERVER_NAME` to the certificate identity, and mount any CA
+bundle through `ACTR_MEMGRAPH_TLS_CA_FILE`.
+
 ## Retrieval Flow
 
 1. Normalize symbolic cues in Rust.

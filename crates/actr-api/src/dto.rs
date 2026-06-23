@@ -464,6 +464,7 @@ pub struct RetrievalDiagnostics {
     pub threshold: f64,
     pub deterministic_seed: Option<u64>,
     pub context_chunk_count: usize,
+    pub activation_compute_ms: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -517,6 +518,7 @@ impl RetrieveResponse {
                 threshold: outcome.diagnostics.threshold,
                 deterministic_seed: outcome.diagnostics.deterministic_seed,
                 context_chunk_count: outcome.diagnostics.context_chunk_count,
+                activation_compute_ms: outcome.diagnostics.activation_compute_ms,
             }),
         }
     }

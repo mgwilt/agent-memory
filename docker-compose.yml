@@ -9,8 +9,8 @@ services:
       - "--storage-properties-on-edges=true"
       - "--log-level=INFO"
     ports:
-      - "7687:7687"
-      - "9091:9091"
+      - "127.0.0.1:7687:7687"
+      - "127.0.0.1:9091:9091"
     volumes:
       - memgraph-data:/var/lib/memgraph
       - memgraph-log:/var/log/memgraph

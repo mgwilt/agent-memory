@@ -1,7 +1,9 @@
+use std::time::Instant;
+
 use actr_core::{
     ActivationParams, AgentId, Chunk, ChunkId, ChunkType, MemoryError, MemoryResult, Slot,
 };
-use actr_ops::{HealthCheck, HealthStatus, RuntimeConfig, service_metrics};
+use actr_ops::{HealthCheck, HealthStatus, RuntimeConfig, render_prometheus_metrics};
 use actr_rules::RuleId;
 use actr_store::{
     AssociationWrite, BufferSetCurrent, CreateChunk, MemoryRepository, MismatchPolicy,
@@ -10,7 +12,8 @@ use actr_store::{
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header::CONTENT_TYPE},
+    response::IntoResponse,
     routing::{get, post, put},
 };
 
@@ -18,9 +21,8 @@ use crate::{
     dto::{
         AgentQuery, AssociateRequest, AssociateResponse, BufferResponse, BufferSetRequest,
         ChunkPatchRequest, ChunkResponse, ChunkUpsertRequest, DeleteResponse, HealthCheckDto,
-        HealthResponse, MetricDto, MetricsResponse, PracticeRequest, PracticeResponse,
-        RetrieveRequest, RetrieveResponse, RuleEvaluateRequest, RuleEvaluateResponse,
-        evaluation_context, parse_buffer_name,
+        HealthResponse, PracticeRequest, PracticeResponse, RetrieveRequest, RetrieveResponse,
+        RuleEvaluateRequest, RuleEvaluateResponse, evaluation_context, parse_buffer_name,
     },
     problem::ApiProblem,
     service::ApiState,
@@ -98,7 +100,7 @@ pub fn route_manifest() -> Vec<RouteSpec> {
         RouteSpec {
             method: "GET",
             path: "/metrics",
-            purpose: "JSON metrics scrape",
+            purpose: "Prometheus metrics scrape",
         },
     ]
 }
@@ -160,13 +162,16 @@ async fn upsert_chunk(
         chunk.upsert_slot(key, value.into());
     }
     let event_id = format!("encode-{}-{}-{}", req.agent_id, req.chunk_id, req.now_ms);
-    let response = state
-        .repository
-        .upsert_chunk(CreateChunk {
-            chunk,
-            initial_practice_event_id: event_id,
-        })
-        .map(ChunkResponse::from)?;
+    let response = track_memory_result(
+        &state,
+        state
+            .repository
+            .upsert_chunk(CreateChunk {
+                chunk,
+                initial_practice_event_id: event_id,
+            })
+            .map(ChunkResponse::from),
+    )?;
     Ok(Json(response))
 }
 
@@ -205,12 +210,15 @@ async fn patch_chunk(
             })
         })
         .collect::<Result<Vec<_>, ApiProblem>>()?;
-    let chunk = state.repository.update_chunk(UpdateChunk {
-        agent_id: AgentId::from(req.agent_id),
-        chunk_id: ChunkId::from(chunk_id),
-        expected_version: req.expected_version,
-        slots,
-    })?;
+    let chunk = track_memory_result(
+        &state,
+        state.repository.update_chunk(UpdateChunk {
+            agent_id: AgentId::from(req.agent_id),
+            chunk_id: ChunkId::from(chunk_id),
+            expected_version: req.expected_version,
+            slots,
+        }),
+    )?;
     Ok(Json(ChunkResponse::from(chunk)))
 }
 
@@ -221,9 +229,12 @@ async fn delete_chunk(
 ) -> Result<Json<DeleteResponse>, ApiProblem> {
     validate_non_empty("agent_id", &query.agent_id)?;
     validate_non_empty("chunk_id", &chunk_id)?;
-    state.repository.soft_delete_chunk(
-        &AgentId::from(query.agent_id.clone()),
-        &ChunkId::from(chunk_id.clone()),
+    track_memory_result(
+        &state,
+        state.repository.soft_delete_chunk(
+            &AgentId::from(query.agent_id.clone()),
+            &ChunkId::from(chunk_id.clone()),
+        ),
     )?;
     Ok(Json(DeleteResponse {
         deleted: true,
@@ -265,11 +276,24 @@ async fn retrieve_memory(
     retrieval.deterministic_seed = req.deterministic_seed;
     retrieval.commit_on_hit = req.commit_on_hit;
 
-    let outcome = state
-        .sessions
-        .with_session(AgentId::from(req.agent_id), |session| {
-            retrieve_chunk(&state.repository, session, retrieval)
-        })?;
+    let retrieval_started = Instant::now();
+    let observed = track_memory_result(
+        &state,
+        state
+            .sessions
+            .with_session_observed(AgentId::from(req.agent_id), |session| {
+                retrieve_chunk(&state.repository, session, retrieval)
+            }),
+    )?;
+    if observed.contended {
+        state.counters.record_session_lock_contention();
+    }
+    let outcome = observed.output;
+    state.counters.record_retrieval_observation(
+        retrieval_started.elapsed().as_secs_f64() * 1_000.0,
+        outcome.diagnostics.candidates_examined,
+        outcome.diagnostics.activation_compute_ms,
+    );
     match outcome.status {
         actr_store::RetrievalStatus::Hit => state.counters.record_retrieval_hit(),
         actr_store::RetrievalStatus::Miss => state.counters.record_retrieval_miss(),
@@ -294,14 +318,17 @@ async fn record_practice(
             req.agent_id, req.chunk_id, req.occurred_at_ms, req.kind
         )
     });
-    state.repository.append_practice_event(PracticeEventWrite {
-        event_id: event_id.clone(),
-        agent_id: AgentId::from(req.agent_id.clone()),
-        chunk_id: ChunkId::from(req.chunk_id.clone()),
-        occurred_at_ms: req.occurred_at_ms,
-        kind: req.kind.clone(),
-        weight: req.weight,
-    })?;
+    track_memory_result(
+        &state,
+        state.repository.append_practice_event(PracticeEventWrite {
+            event_id: event_id.clone(),
+            agent_id: AgentId::from(req.agent_id.clone()),
+            chunk_id: ChunkId::from(req.chunk_id.clone()),
+            occurred_at_ms: req.occurred_at_ms,
+            kind: req.kind.clone(),
+            weight: req.weight,
+        }),
+    )?;
     Ok(Json(PracticeResponse {
         event_id,
         agent_id: req.agent_id,
@@ -319,15 +346,18 @@ async fn upsert_association(
     validate_non_empty("src_chunk_id", &req.src_chunk_id)?;
     validate_non_empty("dst_chunk_id", &req.dst_chunk_id)?;
     validate_non_empty("source", &req.source)?;
-    state.repository.upsert_association(AssociationWrite {
-        agent_id: AgentId::from(req.agent_id.clone()),
-        src_chunk_id: ChunkId::from(req.src_chunk_id.clone()),
-        dst_chunk_id: ChunkId::from(req.dst_chunk_id.clone()),
-        source: req.source.clone(),
-        strength: req.strength,
-        fan: req.fan,
-        updated_at_ms: req.updated_at_ms,
-    })?;
+    track_memory_result(
+        &state,
+        state.repository.upsert_association(AssociationWrite {
+            agent_id: AgentId::from(req.agent_id.clone()),
+            src_chunk_id: ChunkId::from(req.src_chunk_id.clone()),
+            dst_chunk_id: ChunkId::from(req.dst_chunk_id.clone()),
+            source: req.source.clone(),
+            strength: req.strength,
+            fan: req.fan,
+            updated_at_ms: req.updated_at_ms,
+        }),
+    )?;
     Ok(Json(AssociateResponse {
         agent_id: req.agent_id,
         src_chunk_id: req.src_chunk_id,
@@ -351,12 +381,15 @@ async fn set_buffer(
         .repository
         .get_chunk(&agent_id, &chunk_id)?
         .ok_or_else(|| MemoryError::NotFound(format!("chunk {}", req.chunk_id)))?;
-    state.repository.set_buffer_current(BufferSetCurrent {
-        agent_id: agent_id.clone(),
-        buffer_name: buffer_name.clone(),
-        chunk_id: chunk_id.clone(),
-        set_at_ms: req.set_at_ms,
-    })?;
+    track_memory_result(
+        &state,
+        state.repository.set_buffer_current(BufferSetCurrent {
+            agent_id: agent_id.clone(),
+            buffer_name: buffer_name.clone(),
+            chunk_id: chunk_id.clone(),
+            set_at_ms: req.set_at_ms,
+        }),
+    )?;
     let snapshot = state.sessions.with_session(agent_id, |session| {
         Ok(session.set_buffer(
             buffer_name,
@@ -427,16 +460,11 @@ async fn readyz() -> (StatusCode, Json<HealthResponse>) {
     (StatusCode::OK, Json(response))
 }
 
-async fn metrics(State(state): State<ApiState>) -> Json<MetricsResponse> {
-    let metrics = service_metrics()
-        .into_iter()
-        .map(|metric| MetricDto {
-            value: metric_value(metric.name, &state),
-            name: metric.name.to_string(),
-            help: metric.help.to_string(),
-        })
-        .collect();
-    Json(MetricsResponse { metrics })
+async fn metrics(State(state): State<ApiState>) -> impl IntoResponse {
+    (
+        [(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        render_prometheus_metrics(&state.counters.metric_samples()),
+    )
 }
 
 fn health_response(status: &str, checks: Vec<HealthCheck>) -> HealthResponse {
@@ -461,13 +489,11 @@ fn health_status_label(status: HealthStatus) -> &'static str {
     }
 }
 
-fn metric_value(name: &str, state: &ApiState) -> f64 {
-    match name {
-        "actr_memory_retrieval_hits_total" => state.counters.retrieval_hits() as f64,
-        "actr_memory_retrieval_misses_total" => state.counters.retrieval_misses() as f64,
-        "actr_memory_write_conflicts_total" => state.counters.write_conflicts() as f64,
-        _ => 0.0,
+fn track_memory_result<T>(state: &ApiState, result: MemoryResult<T>) -> Result<T, ApiProblem> {
+    if matches!(result, Err(MemoryError::Conflict(_))) {
+        state.counters.record_write_conflict();
     }
+    result.map_err(ApiProblem::from)
 }
 
 fn validate_non_empty(field: &str, value: &str) -> Result<(), ApiProblem> {
@@ -482,7 +508,7 @@ fn validate_non_empty(field: &str, value: &str) -> Result<(), ApiProblem> {
 mod tests {
     use axum::{
         body::{Body, to_bytes},
-        http::{Request, StatusCode},
+        http::{Request, StatusCode, header::CONTENT_TYPE},
     };
     use serde_json::{Value, json};
     use tower::ServiceExt;
@@ -520,6 +546,26 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX).await?;
         let value = serde_json::from_slice(&bytes)?;
         Ok((status, value))
+    }
+
+    async fn get_text(
+        app: Router,
+        uri: &str,
+    ) -> Result<(StatusCode, Option<String>, String), Box<dyn std::error::Error>> {
+        let request = Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())?;
+        let response = app.oneshot(request).await?;
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await?;
+        let body = String::from_utf8(bytes.to_vec())?;
+        Ok((status, content_type, body))
     }
 
     async fn seed_chunk(
@@ -584,17 +630,14 @@ mod tests {
         assert_eq!(retrieve_body["results"][0]["chunk_id"], "ck-actr");
         assert!(retrieve_body["diagnostics"]["candidates_examined"].as_u64() == Some(1));
 
-        let (metrics_status, metrics_body) = get_json(app, "/metrics").await?;
+        let (metrics_status, content_type, metrics_body) = get_text(app, "/metrics").await?;
         assert_eq!(metrics_status, StatusCode::OK);
-        let hit_metric = metrics_body["metrics"]
-            .as_array()
-            .and_then(|metrics| {
-                metrics
-                    .iter()
-                    .find(|metric| metric["name"] == "actr_memory_retrieval_hits_total")
-            })
-            .and_then(|metric| metric["value"].as_f64());
-        assert_eq!(hit_metric, Some(1.0));
+        assert!(content_type.is_some_and(|value| value.starts_with("text/plain")));
+        assert!(metrics_body.contains("# TYPE actr_memory_retrieval_hits_total counter"));
+        assert!(metrics_body.contains("actr_memory_retrieval_hits_total 1"));
+        assert!(metrics_body.contains("actr_memory_candidates_examined 1"));
+        assert!(metrics_body.contains("actr_memory_activation_compute_ms"));
+        assert!(metrics_body.contains("actr_memory_session_lock_contention_total"));
         Ok(())
     }
 

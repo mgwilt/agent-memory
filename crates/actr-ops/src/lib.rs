@@ -4,6 +4,8 @@ pub mod config;
 pub mod health;
 pub mod metrics;
 
-pub use config::{RuntimeConfig, RuntimeProfile};
+pub use config::{MemgraphSecurityConfig, RuntimeConfig, RuntimeProfile, SecretSource};
 pub use health::{HealthCheck, HealthStatus};
-pub use metrics::{MetricSpec, service_metrics};
+pub use metrics::{
+    MetricKind, MetricSample, MetricSpec, render_prometheus_metrics, service_metrics,
+};
