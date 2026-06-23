@@ -14,5 +14,8 @@
     "@ai-sdk/openai-compatible": "2.0.51",
     "ai": "6.0.208",
     "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "lefthook": "2.1.9"
   }
 }
