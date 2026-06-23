@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use actr_core::{
     AgentId, Chunk, ChunkId, MemoryError, MemoryResult, PracticeEvent, Slot, SlotValue,
 };
-use actr_rules::{ProductionRule, RuleId};
+use actr_rules::{
+    ProductionRule, ProductionRuleMetadata, RuleId, RuleRewardUpdate, apply_reward_to_rule,
+};
 use actr_session::BufferName;
 
 pub const DEFAULT_CANDIDATE_LIMIT: usize = 200;
@@ -175,6 +177,30 @@ impl ProductionRuleRecord {
                 "production rule utility and reward must be finite".to_string(),
             ))
         }
+    }
+
+    pub fn metadata(&self) -> ProductionRuleMetadata {
+        self.rule.metadata()
+    }
+
+    pub fn record_reward(
+        &mut self,
+        reward: f64,
+        learning_rate: f64,
+        succeeded: bool,
+    ) -> RuleRewardUpdate {
+        let attempts = self.success_count.saturating_add(self.failure_count);
+        self.avg_reward = if attempts == 0 {
+            reward
+        } else {
+            ((self.avg_reward * attempts as f64) + reward) / attempts.saturating_add(1) as f64
+        };
+        if succeeded {
+            self.success_count = self.success_count.saturating_add(1);
+        } else {
+            self.failure_count = self.failure_count.saturating_add(1);
+        }
+        apply_reward_to_rule(&mut self.rule, reward, learning_rate)
     }
 }
 
@@ -709,14 +735,12 @@ mod tests {
         let repo = InMemoryRepository::default();
         let record = ProductionRuleRecord {
             agent_id: AgentId::from("agent-1"),
-            rule: ProductionRule {
-                rule_id: RuleId("rule-1".to_string()),
-                name: "retrieve fact".to_string(),
-                enabled: true,
-                utility: 1.25,
-                version: 1,
-                conditions: vec![BufferCondition::buffer_present(BufferName::Goal)],
-            },
+            rule: ProductionRule::new(
+                RuleId("rule-1".to_string()),
+                "retrieve fact",
+                vec![BufferCondition::buffer_present(BufferName::Goal)],
+            )
+            .with_utility(1.25),
             success_count: 3,
             failure_count: 1,
             avg_reward: 0.5,
@@ -728,6 +752,32 @@ mod tests {
 
         assert_eq!(fetched, Some(record));
         Ok(())
+    }
+
+    #[test]
+    fn production_rule_record_updates_learned_metadata() {
+        let mut record = ProductionRuleRecord {
+            agent_id: AgentId::from("agent-1"),
+            rule: ProductionRule::new(
+                RuleId::from("rule-1"),
+                "retrieve fact",
+                vec![BufferCondition::buffer_present(BufferName::Goal)],
+            )
+            .with_utility(2.0)
+            .with_version(4),
+            success_count: 1,
+            failure_count: 1,
+            avg_reward: 2.0,
+        };
+
+        let update = record.record_reward(6.0, 0.25, true);
+
+        assert_eq!(update.updated_utility, 3.0);
+        assert_eq!(record.rule.version, 5);
+        assert_eq!(record.success_count, 2);
+        assert_eq!(record.failure_count, 1);
+        assert!((record.avg_reward - (10.0 / 3.0)).abs() < 1e-12);
+        assert_eq!(record.metadata().rule_id, RuleId::from("rule-1"));
     }
 
     #[test]
