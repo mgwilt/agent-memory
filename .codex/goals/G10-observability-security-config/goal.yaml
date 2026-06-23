@@ -1,0 +1,12 @@
+id: G10
+name: observability-security-and-configuration-hardening
+depends_on: [G02, G08, G09]
+complexity: M
+entrypoint: .codex/goals/G10-observability-security-config/prompt.md
+output_schema: .codex/goals/G10-observability-security-config/output.schema.json
+verify: .codex/goals/G10-observability-security-config/verify.sh
+artifacts:
+  - crates/actr-ops/src
+  - config/prometheus/prometheus.yml
+  - docker-compose.yml
+  - docs/architecture.md

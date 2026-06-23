@@ -1,0 +1,13 @@
+id: G05
+name: retrieval-candidate-generation-pipeline
+depends_on: [G03, G04]
+complexity: M
+entrypoint: .codex/goals/G05-retrieval-pipeline/prompt.md
+output_schema: .codex/goals/G05-retrieval-pipeline/output.schema.json
+verify: .codex/goals/G05-retrieval-pipeline/verify.sh
+artifacts:
+  - crates/actr-core/src/activation.rs
+  - crates/actr-store/src/cypher.rs
+  - crates/actr-store/src/repository.rs
+  - crates/actr-session/src/session.rs
+  - tests/integration/retrieval_pipeline.rs

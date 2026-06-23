@@ -1,0 +1,13 @@
+id: G09
+name: test-harnesses-and-benchmark-suite
+depends_on: [G03, G04, G05, G06, G07, G08]
+complexity: M
+entrypoint: .codex/goals/G09-tests-benchmarks/prompt.md
+output_schema: .codex/goals/G09-tests-benchmarks/output.schema.json
+verify: .codex/goals/G09-tests-benchmarks/verify.sh
+artifacts:
+  - tests
+  - benches
+  - crates/actr-core/src/activation.rs
+  - crates/actr-store/src
+  - README.md

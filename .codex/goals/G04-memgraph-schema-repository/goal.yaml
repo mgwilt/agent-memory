@@ -1,0 +1,13 @@
+id: G04
+name: memgraph-schema-and-repository-layer
+depends_on: [G01, G02]
+complexity: M
+entrypoint: .codex/goals/G04-memgraph-schema-repository/prompt.md
+output_schema: .codex/goals/G04-memgraph-schema-repository/output.schema.json
+verify: .codex/goals/G04-memgraph-schema-repository/verify.sh
+artifacts:
+  - crates/actr-store/src/repository.rs
+  - crates/actr-store/src/cypher.rs
+  - crates/actr-store/src/memgraph.rs
+  - crates/actr-store/src/migrations.rs
+  - crates/actr-store/migrations/001_actr_memory_schema.cypher

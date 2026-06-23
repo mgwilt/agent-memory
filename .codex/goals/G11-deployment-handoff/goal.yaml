@@ -1,0 +1,13 @@
+id: G11
+name: deployment-artifact-and-handoff-package
+depends_on: [G08, G09, G10]
+complexity: S
+entrypoint: .codex/goals/G11-deployment-handoff/prompt.md
+output_schema: .codex/goals/G11-deployment-handoff/output.schema.json
+verify: .codex/goals/G11-deployment-handoff/verify.sh
+artifacts:
+  - Dockerfile
+  - docker-compose.yml
+  - scripts
+  - docs/runbook.md
+  - README.md

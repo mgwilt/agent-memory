@@ -1,0 +1,9 @@
+id: TEMPLATE
+name: replace-me
+depends_on: []
+complexity: S
+entrypoint: .codex/goals/template/prompt.md
+output_schema: .codex/goals/template/output.schema.json
+verify: .codex/goals/template/verify.sh
+artifacts:
+  - path/to/artifact

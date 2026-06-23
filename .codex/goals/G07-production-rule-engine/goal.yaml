@@ -1,0 +1,12 @@
+id: G07
+name: production-rule-engine-and-utility-learning
+depends_on: [G03, G06]
+complexity: M
+entrypoint: .codex/goals/G07-production-rule-engine/prompt.md
+output_schema: .codex/goals/G07-production-rule-engine/output.schema.json
+verify: .codex/goals/G07-production-rule-engine/verify.sh
+artifacts:
+  - crates/actr-rules/src/rule.rs
+  - crates/actr-rules/src/engine.rs
+  - crates/actr-rules/src/utility.rs
+  - crates/actr-store/src/repository.rs

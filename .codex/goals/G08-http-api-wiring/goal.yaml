@@ -1,0 +1,11 @@
+id: G08
+name: http-api-and-service-wiring
+depends_on: [G05, G06, G07]
+complexity: M
+entrypoint: .codex/goals/G08-http-api-wiring/prompt.md
+output_schema: .codex/goals/G08-http-api-wiring/output.schema.json
+verify: .codex/goals/G08-http-api-wiring/verify.sh
+artifacts:
+  - crates/actr-api/src
+  - crates/actr-ops/src/config.rs
+  - README.md

@@ -1,0 +1,10 @@
+id: G06
+name: session-state-and-buffer-semantics
+depends_on: [G03]
+complexity: M
+entrypoint: .codex/goals/G06-session-buffer-semantics/prompt.md
+output_schema: .codex/goals/G06-session-buffer-semantics/output.schema.json
+verify: .codex/goals/G06-session-buffer-semantics/verify.sh
+artifacts:
+  - crates/actr-session/src/buffers.rs
+  - crates/actr-session/src/session.rs

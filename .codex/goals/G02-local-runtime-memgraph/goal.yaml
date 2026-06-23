@@ -1,0 +1,14 @@
+id: G02
+name: local-runtime-and-memgraph-bootstrap
+depends_on: [G01]
+complexity: S
+entrypoint: .codex/goals/G02-local-runtime-memgraph/prompt.md
+output_schema: .codex/goals/G02-local-runtime-memgraph/output.schema.json
+verify: .codex/goals/G02-local-runtime-memgraph/verify.sh
+artifacts:
+  - docker-compose.yml
+  - config/prometheus/prometheus.yml
+  - crates/actr-store/migrations/001_actr_memory_schema.cypher
+  - scripts/wait-for-memgraph.sh
+  - scripts/bootstrap-memgraph.sh
+  - README.md

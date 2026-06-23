@@ -1,0 +1,12 @@
+id: G03
+name: core-actr-domain-and-math
+depends_on: [G01]
+complexity: M
+entrypoint: .codex/goals/G03-core-actr-domain-math/prompt.md
+output_schema: .codex/goals/G03-core-actr-domain-math/output.schema.json
+verify: .codex/goals/G03-core-actr-domain-math/verify.sh
+artifacts:
+  - crates/actr-core/src/chunk.rs
+  - crates/actr-core/src/activation.rs
+  - crates/actr-core/src/production.rs
+  - crates/actr-core/src/error.rs

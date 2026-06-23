@@ -1,0 +1,21 @@
+id: G01
+name: repository-scaffold-and-agent-contract
+depends_on: []
+complexity: S
+entrypoint: .codex/goals/G01-repository-scaffold/prompt.md
+output_schema: .codex/goals/G01-repository-scaffold/output.schema.json
+verify: .codex/goals/G01-repository-scaffold/verify.sh
+artifacts:
+  - Cargo.toml
+  - rust-toolchain.toml
+  - Makefile
+  - .editorconfig
+  - .gitignore
+  - AGENTS.md
+  - crates/actr-core
+  - crates/actr-session
+  - crates/actr-rules
+  - crates/actr-store
+  - crates/actr-api
+  - crates/actr-ops
+  - .codex/goals/template

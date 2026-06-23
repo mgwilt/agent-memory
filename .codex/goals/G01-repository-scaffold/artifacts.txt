@@ -1,0 +1,13 @@
+Cargo.toml
+rust-toolchain.toml
+Makefile
+.editorconfig
+.gitignore
+AGENTS.md
+crates/actr-core
+crates/actr-session
+crates/actr-rules
+crates/actr-store
+crates/actr-api
+crates/actr-ops
+.codex/goals/template
