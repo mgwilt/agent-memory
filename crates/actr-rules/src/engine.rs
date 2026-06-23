@@ -346,6 +346,67 @@ mod tests {
     }
 
     #[test]
+    fn non_finite_utility_is_reported_and_excluded_from_conflict_set() {
+        let session = goal_session();
+        let engine = RuleEngine::new(vec![
+            ProductionRule::new(
+                RuleId::from("nan-utility"),
+                "nan utility",
+                vec![BufferCondition::buffer_present(BufferName::Goal)],
+            )
+            .with_utility(f64::NAN),
+            ProductionRule::new(
+                RuleId::from("finite"),
+                "finite",
+                vec![BufferCondition::buffer_present(BufferName::Goal)],
+            )
+            .with_utility(0.5),
+        ]);
+
+        let conflict =
+            engine.conflict_resolution(RuleEvaluationContext::from_buffers(&session.snapshot()));
+
+        assert_eq!(
+            conflict.selected.as_ref().map(|rule| rule.rule_id.clone()),
+            Some(RuleId::from("finite"))
+        );
+        assert_eq!(conflict.matches.len(), 1);
+        assert_eq!(
+            conflict
+                .candidates
+                .iter()
+                .find(|candidate| candidate.rule_id == RuleId::from("nan-utility"))
+                .and_then(|candidate| candidate.rejection_reason),
+            Some(RuleRejectionReason::NonFiniteUtility)
+        );
+    }
+
+    #[test]
+    fn retrieved_chunk_condition_miss_is_reported() {
+        let session = goal_session();
+        let engine = RuleEngine::new(vec![
+            ProductionRule::new(
+                RuleId::from("needs-retrieved"),
+                "needs retrieved",
+                vec![BufferCondition::buffer_present(BufferName::Goal)],
+            )
+            .with_retrieved_chunk(
+                RetrievedChunkCondition::chunk_type(ChunkType::from("fact"))
+                    .with_slot("topic", SlotValue::Symbol("act-r".to_string())),
+            ),
+        ]);
+
+        let conflict =
+            engine.conflict_resolution(RuleEvaluationContext::from_buffers(&session.snapshot()));
+
+        assert!(conflict.no_match());
+        assert_eq!(
+            conflict.candidates[0].rejection_reason,
+            Some(RuleRejectionReason::RetrievedChunkConditionNotMet)
+        );
+    }
+
+    #[test]
     fn no_match_path_is_explicit_and_inspectable() {
         let session = SessionState::new(AgentId::from("agent"));
         let engine = RuleEngine::new(vec![ProductionRule::new(

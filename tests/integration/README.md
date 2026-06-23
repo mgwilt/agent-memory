@@ -1,7 +1,23 @@
 # Integration Tests
 
-Future Memgraph-backed tests belong here or in package-level `tests/`
-directories once G04-G09 introduce a concrete async driver and testcontainers.
+Package-level integration tests live under crate `tests/` directories. The
+shared retrieval pipeline fixture in this directory is mounted by
+`crates/actr-store/tests/retrieval_pipeline.rs` so it runs with
+`cargo test --workspace`.
+
+Live Memgraph coverage is opt-in to keep normal test runs deterministic and
+usable without Docker:
+
+```sh
+docker compose up -d
+./scripts/wait-for-memgraph.sh
+./scripts/bootstrap-memgraph.sh
+ACTR_STORE_MEMGRAPH_TESTS=1 cargo test -p actr-store --test memgraph_live -- --nocapture
+```
+
+The live G09 test seeds a bounded retrieval fixture in Memgraph, verifies
+retrieval-relevant association ordering through `mgconsole`, and deletes the
+test agent's graph before returning.
 
 Required scenarios from the research reports:
 

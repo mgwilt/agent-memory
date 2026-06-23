@@ -34,6 +34,20 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
+Run the reproducible Criterion benchmark suite for activation and retrieval hot
+paths:
+
+```sh
+cargo bench -p actr-store --bench activation_retrieval
+```
+
+Create and compare local benchmark baselines with relative Criterion reports:
+
+```sh
+cargo bench -p actr-store --bench activation_retrieval -- --save-baseline local
+cargo bench -p actr-store --bench activation_retrieval -- --baseline local
+```
+
 Print the API route manifest:
 
 ```sh
@@ -160,6 +174,17 @@ The bootstrap script applies ordered Cypher migrations from
 existing constraints and indexes are skipped, while other Cypher errors still
 fail the script. The schema intentionally creates explicit indexes in addition
 to constraints because Memgraph constraints do not create indexes.
+
+Run the opt-in live Memgraph integration test after the stack is ready:
+
+```sh
+ACTR_STORE_MEMGRAPH_TESTS=1 cargo test -p actr-store --test memgraph_live -- --nocapture
+```
+
+Normal `cargo test --workspace` runs remain deterministic and do not require
+Docker. The live test seeds a bounded retrieval fixture in Memgraph, verifies
+association-driven candidate ordering through `mgconsole`, and removes the test
+agent graph before returning.
 
 Stop the stack while keeping named Docker volumes:
 

@@ -20,6 +20,7 @@
 
 # Rust build, profiling, and coverage output.
 /target/
+target/
 *.rs.bk
 *.profraw
 *.profdata

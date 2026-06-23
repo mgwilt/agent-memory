@@ -10,5 +10,13 @@ actr-core.workspace = true
 actr-session.workspace = true
 actr-rules.workspace = true
 
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "activation_retrieval"
+path = "../../benches/activation_retrieval.rs"
+harness = false
+
 [lints]
 workspace = true

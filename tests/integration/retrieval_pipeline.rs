@@ -429,3 +429,27 @@ fn retrieval_pipeline_returns_score_diagnostics_and_reproducible_noise() -> Memo
     assert!(first_score.predicted_latency_ms.is_finite());
     Ok(())
 }
+
+#[test]
+fn retrieval_pipeline_can_rank_without_committing_buffers() -> MemoryResult<()> {
+    let repo = RecordingRepository::default();
+    let chunk = repo.create_fact("ck-actr", "act-r", 1_000)?;
+    let mut session = SessionState::new(AgentId::from("agent-1"));
+    let mut request = hit_request(2_000);
+    request.commit_on_hit = false;
+
+    let outcome = retrieve_chunk(&repo, &mut session, request)?;
+
+    assert_eq!(outcome.status, RetrievalStatus::Hit);
+    assert_eq!(
+        outcome.hit.as_ref().map(|hit| hit.chunk.chunk_id.clone()),
+        Some(chunk.chunk_id)
+    );
+    assert_eq!(snapshot_retrieval_chunk(&session), None);
+    assert_eq!(
+        repo.buffer_chunk(&AgentId::from("agent-1"), &BufferName::Retrieval),
+        None
+    );
+    assert_eq!(outcome.ranked_candidates.len(), 1);
+    Ok(())
+}

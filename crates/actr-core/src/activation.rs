@@ -429,6 +429,21 @@ mod tests {
     }
 
     #[test]
+    fn base_level_is_stable_for_bounded_practice_histories() {
+        let events = (0..128)
+            .map(|index| PracticeEvent::new(1_000 + index * 250).with_weight(1.0))
+            .collect::<Vec<_>>();
+        let mut reversed = events.clone();
+        reversed.reverse();
+
+        let score = base_level_activation(&events, 60_000, 0.5);
+        let reversed_score = base_level_activation(&reversed, 60_000, 0.5);
+
+        assert!(score.is_finite());
+        assert!((score - reversed_score).abs() < 1e-12);
+    }
+
+    #[test]
     fn spreading_activation_composes_weighted_sources() {
         let sources = [
             SpreadingSource::new(0.4, 1.5),
@@ -510,6 +525,44 @@ mod tests {
     fn deterministic_probability_becomes_hard_threshold() {
         assert_eq!(retrieval_probability(1.0, 0.0, 0.0), 1.0);
         assert_eq!(retrieval_probability(-1.0, 0.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn logistic_probability_remains_bounded_for_extreme_scores() {
+        let low = retrieval_probability(-10_000.0, 0.0, 0.25);
+        let high = retrieval_probability(10_000.0, 0.0, 0.25);
+
+        assert!((0.0..=1.0).contains(&low));
+        assert!((0.0..=1.0).contains(&high));
+        assert!(low < 1e-300);
+        assert!(high > 1.0 - 1e-12);
+    }
+
+    #[test]
+    fn score_activation_keeps_component_breakdown_reproducible() {
+        let input = ActivationInput {
+            now_ms: 20_000,
+            practice_events: vec![
+                PracticeEvent::new(1_000),
+                PracticeEvent::new(4_000).with_weight(0.5),
+            ],
+            spread_score: 0.75,
+            partial_match_score: -0.25,
+            noise: deterministic_noise(7, "ck-1", 0.2),
+            params: ActivationParams {
+                retrieval_threshold: -2.0,
+                noise_s: 0.2,
+                ..ActivationParams::deterministic()
+            },
+        };
+
+        let first = score_activation(&input);
+        let second = score_activation(&input);
+
+        assert_eq!(first, second);
+        assert!((first.activation - first.components.total()).abs() < 1e-12);
+        assert!(first.retrieval_probability.is_finite());
+        assert!(first.predicted_latency_ms.is_finite());
     }
 
     #[test]
