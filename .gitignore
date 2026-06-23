@@ -1,0 +1,87 @@
+# macOS and editor noise.
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+*~
+*.swp
+*.swo
+*.tmp
+.idea/
+.history/
+
+# VS Code: keep shared project files, ignore machine-local state.
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+
+# Rust build, profiling, and coverage output.
+/target/
+*.rs.bk
+*.profraw
+*.profdata
+coverage/
+lcov.info
+cobertura.xml
+tarpaulin-report.html
+flamegraph.svg
+
+# Logs and local runtime artifacts.
+*.log
+/logs/
+/tmp/
+/temp/
+*.pid
+*.dump
+*.backup
+*.bak
+*.db
+*.sqlite
+/test-results/
+
+# Secrets and machine-local config.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.local.*
+.secrets/
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Docker, Memgraph, Grafana, and Prometheus runtime state.
+/data/
+/docker-data/
+/memgraph-data/
+/memgraph-log/
+/memgraph-wal/
+/memgraph-snapshots/
+/grafana-storage/
+/grafana-data/
+/prometheus-data/
+docker-compose.override.yml
+docker-compose*.local.yml
+
+# Codex and local agent run output.
+.codex/tmp/
+.codex/cache/
+.codex/logs/
+.codex/runs/
+.codex/sessions/
+.codex/output/
+.codex/results/
+.goals/**/run/
+.goals/**/runs/
+.goals/**/output/
+.goals/**/outputs/
+.goals/**/result/
+.goals/**/results/
+.goals/**/tmp/
+.goals/**/logs/
