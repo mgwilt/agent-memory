@@ -1,0 +1,32 @@
+[workspace]
+members = [
+    "crates/actr-api",
+    "crates/actr-core",
+    "crates/actr-ops",
+    "crates/actr-rules",
+    "crates/actr-session",
+    "crates/actr-store",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://example.invalid/agent-memory"
+rust-version = "1.85"
+
+[workspace.dependencies]
+actr-api = { path = "crates/actr-api" }
+actr-core = { path = "crates/actr-core" }
+actr-ops = { path = "crates/actr-ops" }
+actr-rules = { path = "crates/actr-rules" }
+actr-session = { path = "crates/actr-session" }
+actr-store = { path = "crates/actr-store" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+dbg_macro = "deny"
+todo = "deny"

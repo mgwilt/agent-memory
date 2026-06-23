@@ -1,0 +1,29 @@
+CREATE CONSTRAINT ON (a:Agent) ASSERT a.agent_id IS UNIQUE;
+CREATE CONSTRAINT ON (b:Buffer) ASSERT b.agent_id, b.buffer_name IS UNIQUE;
+CREATE CONSTRAINT ON (c:Chunk) ASSERT c.agent_id, c.chunk_id IS UNIQUE;
+CREATE CONSTRAINT ON (v:SlotValue) ASSERT v.tenant_id, v.key, v.value_hash IS UNIQUE;
+CREATE CONSTRAINT ON (e:PracticeEvent) ASSERT e.event_id IS UNIQUE;
+CREATE CONSTRAINT ON (p:ProductionRule) ASSERT p.agent_id, p.rule_id IS UNIQUE;
+
+CREATE CONSTRAINT ON (c:Chunk) ASSERT EXISTS (c.agent_id);
+CREATE CONSTRAINT ON (c:Chunk) ASSERT EXISTS (c.chunk_id);
+CREATE CONSTRAINT ON (c:Chunk) ASSERT EXISTS (c.chunk_type);
+CREATE CONSTRAINT ON (c:Chunk) ASSERT c.agent_id IS TYPED STRING;
+CREATE CONSTRAINT ON (c:Chunk) ASSERT c.chunk_id IS TYPED STRING;
+CREATE CONSTRAINT ON (c:Chunk) ASSERT c.active IS TYPED BOOLEAN;
+CREATE CONSTRAINT ON (c:Chunk) ASSERT c.retrieval_count IS TYPED INTEGER;
+
+CREATE INDEX ON :Agent(agent_id);
+CREATE INDEX ON :Buffer(agent_id, buffer_name);
+CREATE INDEX ON :Chunk(agent_id, chunk_id);
+CREATE INDEX ON :Chunk(agent_id, chunk_type);
+CREATE INDEX ON :Chunk(agent_id, slot_hash);
+CREATE INDEX ON :Chunk(agent_id, last_practiced_at) WITH CONFIG {"order": "DESC"};
+CREATE INDEX ON :Chunk(agent_id, base_level_cache) WITH CONFIG {"order": "DESC"};
+CREATE INDEX ON :Chunk(last_access_at) WITH CONFIG {"order": "DESC"};
+CREATE INDEX ON :SlotValue(tenant_id, key, value_hash);
+CREATE INDEX ON :PracticeEvent(event_id);
+CREATE INDEX ON :PracticeEvent(agent_id, ts) WITH CONFIG {"order": "DESC"};
+CREATE INDEX ON :ProductionRule(enabled, utility) WITH CONFIG {"order": "DESC"};
+CREATE INDEX ON :ProductionRule(agent_id, rule_id);
+CREATE EDGE INDEX ON :ASSOCIATED(strength);
