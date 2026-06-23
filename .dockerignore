@@ -1,0 +1,7 @@
+target/
+.git/
+.codex/
+.agents/
+.env
+.env.*
+*.log

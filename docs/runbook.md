@@ -2,17 +2,26 @@
 
 ## Local Stack
 
-Start Memgraph and observability services:
+Build the API image, then start the local single-node stack:
 
 ```sh
+docker compose build api
 docker compose up -d
 ./scripts/wait-for-memgraph.sh
 ./scripts/bootstrap-memgraph.sh
+./scripts/demo-retrieval.sh
 ```
 
-Memgraph Bolt and OpenMetrics ports are published on `127.0.0.1` only:
-`127.0.0.1:7687` and `127.0.0.1:9091`. Prometheus scrapes Memgraph through the
-private Compose service name `memgraph:9091`.
+The stack includes the Rust API image, one Memgraph node, and Prometheus. Ports
+are published on `127.0.0.1` only: API `8080`, Memgraph Bolt `7687`, Memgraph
+OpenMetrics `9091`, and Prometheus `9090`. Prometheus scrapes Memgraph through
+`memgraph:9091` and the API through `api:8080` on the private Compose network.
+
+Run the retrieval demo against a non-default API URL when needed:
+
+```sh
+ACTR_API_URL=http://127.0.0.1:8090 ./scripts/demo-retrieval.sh
+```
 
 Stop the stack:
 
@@ -26,6 +35,7 @@ docker compose down
 cargo check --workspace --all-targets
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+.codex/goals/G11-deployment-handoff/verify.sh
 ```
 
 ## Runtime Configuration
@@ -53,11 +63,20 @@ keys, or local `.env` files.
 
 - If schema bootstrap fails, confirm Memgraph is ready with
   `./scripts/wait-for-memgraph.sh`.
+- If bootstrap reports `No Cypher migrations found`, run it from the repository
+  root or set `MIGRATION_DIR` to the migrations directory.
+- If bootstrap skips statements as already applied, that is expected on reruns;
+  non-schema Cypher errors still fail the script.
 - If Bolt connectivity fails, confirm port `7687` is free and the Compose
   service is healthy.
+- If the API container exits immediately, rebuild it and confirm it is running
+  the default `serve` command with `docker compose ps api`.
+- If `scripts/demo-retrieval.sh` cannot reach the API, confirm port `8080` is
+  free, `docker compose ps api` shows a running container, and
+  `curl -fsS http://127.0.0.1:8080/healthz` returns JSON.
 - If Memgraph metrics are missing, confirm Prometheus can reach `memgraph:9091`
   from the Compose network.
 - If service metrics are missing, confirm the API is serving `/metrics` and that
-  the `actr-memory` Prometheus target reaches `host.docker.internal:8080`.
+  the `actr-memory` Prometheus target reaches `api:8080`.
 - If retrieval tests become nondeterministic, check that noise uses deterministic
   seeds in test mode.

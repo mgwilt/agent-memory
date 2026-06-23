@@ -1,4 +1,16 @@
 services:
+  api:
+    build:
+      context: .
+    environment:
+      ACTR_API_BIND_ADDR: 0.0.0.0:8080
+      ACTR_MEMGRAPH_URI: bolt://memgraph:7687
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      memgraph:
+        condition: service_healthy
+
   memgraph:
     image: memgraph/memgraph:latest
     command:
@@ -25,10 +37,12 @@ services:
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     depends_on:
+      api:
+        condition: service_started
       memgraph:
         condition: service_healthy
 
@@ -37,7 +51,7 @@ services:
     profiles:
       - dashboards
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - grafana-storage:/var/lib/grafana
     depends_on:

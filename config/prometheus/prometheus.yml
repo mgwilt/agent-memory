@@ -10,9 +10,9 @@ scrape_configs:
       - targets:
           - memgraph:9091
 
-  # The Rust API exposes Prometheus text at /metrics when run on the host.
+  # The Rust API exposes Prometheus text at /metrics in the Compose network.
   - job_name: actr-memory
     metrics_path: /metrics
     static_configs:
       - targets:
-          - host.docker.internal:8080
+          - api:8080

@@ -34,6 +34,17 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
+Build the service image, start the single-node local stack, bootstrap Memgraph,
+and run the HTTP retrieval demo:
+
+```sh
+docker compose build api
+docker compose up -d
+./scripts/wait-for-memgraph.sh
+./scripts/bootstrap-memgraph.sh
+./scripts/demo-retrieval.sh
+```
+
 Run the reproducible Criterion benchmark suite for activation and retrieval hot
 paths:
 
@@ -58,7 +69,7 @@ Start the local Axum API with the in-memory repository used by the current
 service wiring:
 
 ```sh
-cargo run -p actr-api
+cargo run -p actr-api -- serve
 ```
 
 By default the server binds to `127.0.0.1:8080`. Override it with
@@ -159,21 +170,30 @@ curl -sS http://127.0.0.1:8080/metrics
 Start the single-node local stack:
 
 ```sh
+docker compose build api
 docker compose up -d
 ./scripts/wait-for-memgraph.sh
 ./scripts/bootstrap-memgraph.sh
+./scripts/demo-retrieval.sh
 ```
 
-Memgraph listens on Bolt port `7687`. Its OpenMetrics endpoint is exposed on
-`http://localhost:9091/metrics`, and Prometheus is available at
-`http://localhost:9090`. Grafana is optional to avoid local port conflicts; start
-it with `docker compose --profile dashboards up -d` when port `3000` is free.
+The stack starts the Rust API image, Memgraph, and Prometheus. The API listens
+on `http://127.0.0.1:8080`, Memgraph listens on Bolt port `7687`, Memgraph
+OpenMetrics is exposed on `http://127.0.0.1:9091/metrics`, and Prometheus is
+available at `http://127.0.0.1:9090`. Grafana is optional to avoid local port
+conflicts; start it with `docker compose --profile dashboards up -d` when port
+`3000` is free.
 
 The bootstrap script applies ordered Cypher migrations from
 `crates/actr-store/migrations/`. It is safe to rerun during local development:
 existing constraints and indexes are skipped, while other Cypher errors still
 fail the script. The schema intentionally creates explicit indexes in addition
 to constraints because Memgraph constraints do not create indexes.
+
+The demo retrieval script talks to the HTTP API and validates a deterministic
+chunk retrieval plus the retrieval hit metric. It uses the in-memory API
+repository while Memgraph schema bootstrap is verified separately by the
+bootstrap step.
 
 Run the opt-in live Memgraph integration test after the stack is ready:
 
