@@ -1,4 +1,8 @@
-use std::{cell::RefCell, cmp::Ordering, collections::BTreeMap};
+use std::{
+    cmp::Ordering,
+    collections::BTreeMap,
+    sync::{Mutex, MutexGuard},
+};
 
 use nestor_core::{
     ActivationParams, AgentId, Chunk, ChunkId, ChunkType, MemoryError, MemoryResult, PracticeEvent,
@@ -7,9 +11,10 @@ use nestor_core::{
 use nestor_rules::RuleId;
 use nestor_session::{BufferName, SessionState};
 use nestor_store::{
-    AssociationWrite, BufferSetCurrent, CandidateQuery, ChunkWithHistory, CreateChunk,
-    DEFAULT_CANDIDATE_LIMIT, MemoryRepository, MismatchPolicy, PracticeEventWrite,
-    ProductionRuleRecord, RetrievalMissReason, RetrievalRequest, RetrievalStatus, UpdateChunk,
+    AssociationWrite, BufferSetCurrent, CandidateQuery, ChunkWithHistory, ConsolidateRequest,
+    ConsolidationReport, CreateChunk, DEFAULT_CANDIDATE_LIMIT, ForgetReport, ForgetRequest,
+    MemoryRepository, MismatchPolicy, PracticeEventWrite, ProductionRuleRecord,
+    RetrievalMissReason, RetrievalPracticeWrite, RetrievalRequest, RetrievalStatus, UpdateChunk,
     retrieve_chunk,
 };
 
@@ -21,15 +26,20 @@ struct StoredChunkState {
 
 #[derive(Debug, Default)]
 struct RecordingRepository {
-    chunks: RefCell<BTreeMap<(AgentId, ChunkId), StoredChunkState>>,
-    practice_events: RefCell<BTreeMap<String, PracticeEventWrite>>,
-    associations: RefCell<BTreeMap<(AgentId, ChunkId, ChunkId, String), AssociationWrite>>,
-    buffers: RefCell<BTreeMap<(AgentId, BufferName), ChunkId>>,
-    candidate_queries: RefCell<Vec<CandidateQuery>>,
+    chunks: Mutex<BTreeMap<(AgentId, ChunkId), StoredChunkState>>,
+    practice_events: Mutex<BTreeMap<String, PracticeEventWrite>>,
+    associations: Mutex<BTreeMap<(AgentId, ChunkId, ChunkId, String), AssociationWrite>>,
+    buffers: Mutex<BTreeMap<(AgentId, BufferName), ChunkId>>,
+    candidate_queries: Mutex<Vec<CandidateQuery>>,
 }
 
 impl RecordingRepository {
-    fn create_fact(&self, chunk_id: &str, topic: &str, created_at_ms: u64) -> MemoryResult<Chunk> {
+    async fn create_fact(
+        &self,
+        chunk_id: &str,
+        topic: &str,
+        created_at_ms: u64,
+    ) -> MemoryResult<Chunk> {
         self.create_chunk(CreateChunk {
             chunk: Chunk::new(
                 AgentId::from("agent-1"),
@@ -40,31 +50,40 @@ impl RecordingRepository {
             .with_slot("topic", SlotValue::Symbol(topic.to_string())),
             initial_practice_event_id: format!("encode-{chunk_id}"),
         })
+        .await
     }
 
     fn buffer_chunk(&self, agent_id: &AgentId, buffer_name: &BufferName) -> Option<ChunkId> {
         self.buffers
-            .borrow()
+            .lock()
+            .ok()?
             .get(&(agent_id.clone(), buffer_name.clone()))
             .cloned()
     }
 
     fn last_candidate_query(&self) -> Option<CandidateQuery> {
-        self.candidate_queries.borrow().last().cloned()
+        self.candidate_queries.lock().ok()?.last().cloned()
     }
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> MemoryResult<MutexGuard<'_, T>> {
+    mutex
+        .lock()
+        .map_err(|_| MemoryError::Conflict("recording repository lock poisoned".to_string()))
+}
+
+#[async_trait::async_trait]
 impl MemoryRepository for RecordingRepository {
-    fn create_chunk(&self, req: CreateChunk) -> MemoryResult<Chunk> {
+    async fn create_chunk(&self, req: CreateChunk) -> MemoryResult<Chunk> {
         req.validate()?;
         let key = (req.chunk.agent_id.clone(), req.chunk.chunk_id.clone());
-        if self.chunks.borrow().contains_key(&key) {
+        if lock(&self.chunks)?.contains_key(&key) {
             return Err(MemoryError::Conflict(format!(
                 "chunk {} already exists",
                 req.chunk.chunk_id.as_str()
             )));
         }
-        self.practice_events.borrow_mut().insert(
+        lock(&self.practice_events)?.insert(
             req.initial_practice_event_id.clone(),
             PracticeEventWrite {
                 event_id: req.initial_practice_event_id,
@@ -75,7 +94,7 @@ impl MemoryRepository for RecordingRepository {
                 weight: 1.0,
             },
         );
-        self.chunks.borrow_mut().insert(
+        lock(&self.chunks)?.insert(
             key,
             StoredChunkState {
                 chunk: req.chunk.clone(),
@@ -85,23 +104,52 @@ impl MemoryRepository for RecordingRepository {
         Ok(req.chunk)
     }
 
-    fn get_chunk(&self, agent_id: &AgentId, chunk_id: &ChunkId) -> MemoryResult<Option<Chunk>> {
+    async fn upsert_chunk(&self, req: CreateChunk) -> MemoryResult<Chunk> {
+        req.validate()?;
+        let key = (req.chunk.agent_id.clone(), req.chunk.chunk_id.clone());
+        lock(&self.practice_events)?.insert(
+            req.initial_practice_event_id.clone(),
+            PracticeEventWrite {
+                event_id: req.initial_practice_event_id,
+                agent_id: req.chunk.agent_id.clone(),
+                chunk_id: req.chunk.chunk_id.clone(),
+                occurred_at_ms: req.chunk.created_at_ms,
+                kind: "encode".to_string(),
+                weight: 1.0,
+            },
+        );
+        lock(&self.chunks)?.insert(
+            key,
+            StoredChunkState {
+                chunk: req.chunk.clone(),
+                active: true,
+            },
+        );
+        Ok(req.chunk)
+    }
+
+    async fn get_chunk(
+        &self,
+        agent_id: &AgentId,
+        chunk_id: &ChunkId,
+    ) -> MemoryResult<Option<Chunk>> {
         Ok(self
             .chunks
-            .borrow()
+            .lock()
+            .map_err(|_| MemoryError::Conflict("recording repository lock poisoned".to_string()))?
             .get(&(agent_id.clone(), chunk_id.clone()))
             .filter(|stored| stored.active)
             .map(|stored| stored.chunk.clone()))
     }
 
-    fn update_chunk(&self, _req: UpdateChunk) -> MemoryResult<Chunk> {
+    async fn update_chunk(&self, _req: UpdateChunk) -> MemoryResult<Chunk> {
         Err(MemoryError::Validation(
             "update_chunk is not needed by retrieval pipeline tests".to_string(),
         ))
     }
 
-    fn soft_delete_chunk(&self, agent_id: &AgentId, chunk_id: &ChunkId) -> MemoryResult<()> {
-        let mut chunks = self.chunks.borrow_mut();
+    async fn soft_delete_chunk(&self, agent_id: &AgentId, chunk_id: &ChunkId) -> MemoryResult<()> {
+        let mut chunks = lock(&self.chunks)?;
         let stored = chunks
             .get_mut(&(agent_id.clone(), chunk_id.clone()))
             .ok_or_else(|| MemoryError::NotFound(format!("chunk {}", chunk_id.as_str())))?;
@@ -109,27 +157,38 @@ impl MemoryRepository for RecordingRepository {
         Ok(())
     }
 
-    fn append_practice_event(&self, req: PracticeEventWrite) -> MemoryResult<()> {
+    async fn append_practice_event(&self, req: PracticeEventWrite) -> MemoryResult<()> {
         req.validate()?;
-        if self.practice_events.borrow().contains_key(&req.event_id) {
+        if lock(&self.practice_events)?.contains_key(&req.event_id) {
             return Err(MemoryError::Conflict(format!(
                 "practice event {} already exists",
                 req.event_id
             )));
         }
-        self.practice_events
-            .borrow_mut()
-            .insert(req.event_id.clone(), req);
+        lock(&self.practice_events)?.insert(req.event_id.clone(), req);
         Ok(())
     }
 
-    fn fetch_candidates(&self, req: CandidateQuery) -> MemoryResult<Vec<ChunkWithHistory>> {
+    async fn record_successful_retrieval(&self, req: RetrievalPracticeWrite) -> MemoryResult<()> {
         req.validate()?;
-        self.candidate_queries.borrow_mut().push(req.clone());
+        self.append_practice_event(PracticeEventWrite {
+            event_id: req.event_id,
+            agent_id: req.agent_id,
+            chunk_id: req.chunk_id,
+            occurred_at_ms: req.occurred_at_ms,
+            kind: "retrieve".to_string(),
+            weight: req.weight,
+        })
+        .await
+    }
 
-        let chunks = self.chunks.borrow();
-        let events = self.practice_events.borrow();
-        let associations = self.associations.borrow();
+    async fn fetch_candidates(&self, req: CandidateQuery) -> MemoryResult<Vec<ChunkWithHistory>> {
+        req.validate()?;
+        lock(&self.candidate_queries)?.push(req.clone());
+
+        let chunks = lock(&self.chunks)?;
+        let events = lock(&self.practice_events)?;
+        let associations = lock(&self.associations)?;
         let mut candidates = chunks
             .values()
             .filter(|stored| stored.active)
@@ -200,14 +259,15 @@ impl MemoryRepository for RecordingRepository {
                     chunk,
                     practice_events,
                     spread_score,
+                    base_level_cache_stale: false,
                 },
             )
             .collect())
     }
 
-    fn upsert_association(&self, req: AssociationWrite) -> MemoryResult<()> {
+    async fn upsert_association(&self, req: AssociationWrite) -> MemoryResult<()> {
         req.validate()?;
-        self.associations.borrow_mut().insert(
+        lock(&self.associations)?.insert(
             (
                 req.agent_id.clone(),
                 req.src_chunk_id.clone(),
@@ -219,28 +279,49 @@ impl MemoryRepository for RecordingRepository {
         Ok(())
     }
 
-    fn set_buffer_current(&self, req: BufferSetCurrent) -> MemoryResult<()> {
+    async fn set_buffer_current(&self, req: BufferSetCurrent) -> MemoryResult<()> {
         req.validate()?;
-        self.buffers.borrow_mut().insert(
+        lock(&self.buffers)?.insert(
             (req.agent_id.clone(), req.buffer_name.clone()),
             req.chunk_id.clone(),
         );
         Ok(())
     }
 
-    fn upsert_production_rule(
+    async fn upsert_production_rule(
         &self,
         req: ProductionRuleRecord,
     ) -> MemoryResult<ProductionRuleRecord> {
         Ok(req)
     }
 
-    fn get_production_rule(
+    async fn get_production_rule(
         &self,
         _agent_id: &AgentId,
         _rule_id: &RuleId,
     ) -> MemoryResult<Option<ProductionRuleRecord>> {
         Ok(None)
+    }
+
+    async fn consolidate(&self, req: ConsolidateRequest) -> MemoryResult<ConsolidationReport> {
+        req.validate()?;
+        Ok(ConsolidationReport {
+            agent_id: req.agent_id,
+            groups_considered: 0,
+            groups_consolidated: 0,
+            summaries: Vec::new(),
+        })
+    }
+
+    async fn forget(&self, req: ForgetRequest) -> MemoryResult<ForgetReport> {
+        req.validate()?;
+        Ok(ForgetReport {
+            agent_id: req.agent_id,
+            examined: 0,
+            forgotten_chunk_ids: Vec::new(),
+            archived_chunk_ids: Vec::new(),
+            protected_chunk_ids: Vec::new(),
+        })
     }
 }
 
@@ -277,13 +358,13 @@ fn snapshot_retrieval_chunk(session: &SessionState) -> Option<ChunkId> {
         .and_then(|buffer| buffer.chunk_id)
 }
 
-#[test]
-fn retrieval_pipeline_exact_match_commits_retrieval_buffer() -> MemoryResult<()> {
+#[tokio::test]
+async fn retrieval_pipeline_exact_match_commits_retrieval_buffer() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000)?;
+    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000).await?;
     let mut session = SessionState::new(AgentId::from("agent-1"));
 
-    let outcome = retrieve_chunk(&repo, &mut session, hit_request(2_000))?;
+    let outcome = retrieve_chunk(&repo, &mut session, hit_request(2_000)).await?;
 
     assert_eq!(outcome.status, RetrievalStatus::Hit);
     assert_eq!(
@@ -298,6 +379,11 @@ fn retrieval_pipeline_exact_match_commits_retrieval_buffer() -> MemoryResult<()>
         repo.buffer_chunk(&AgentId::from("agent-1"), &BufferName::Retrieval),
         Some(chunk.chunk_id)
     );
+    assert!(
+        lock(&repo.practice_events)?
+            .values()
+            .any(|event| event.kind == "retrieve" && event.chunk_id == ChunkId::from("ck-nestor"))
+    );
     assert_eq!(
         repo.last_candidate_query()
             .map(|query| query.candidate_limit),
@@ -310,15 +396,15 @@ fn retrieval_pipeline_exact_match_commits_retrieval_buffer() -> MemoryResult<()>
     Ok(())
 }
 
-#[test]
-fn retrieval_pipeline_threshold_miss_is_explicit_and_does_not_commit() -> MemoryResult<()> {
+#[tokio::test]
+async fn retrieval_pipeline_threshold_miss_is_explicit_and_does_not_commit() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    repo.create_fact("ck-nestor", "act-r", 1_000)?;
+    repo.create_fact("ck-nestor", "act-r", 1_000).await?;
     let mut session = SessionState::new(AgentId::from("agent-1"));
     let mut request = hit_request(2_000);
     request.activation_params.retrieval_threshold = 10.0;
 
-    let outcome = retrieve_chunk(&repo, &mut session, request)?;
+    let outcome = retrieve_chunk(&repo, &mut session, request).await?;
 
     assert_eq!(outcome.status, RetrievalStatus::Miss);
     assert_eq!(
@@ -335,13 +421,13 @@ fn retrieval_pipeline_threshold_miss_is_explicit_and_does_not_commit() -> Memory
     Ok(())
 }
 
-#[test]
-fn retrieval_pipeline_empty_candidate_miss_is_explicit() -> MemoryResult<()> {
+#[tokio::test]
+async fn retrieval_pipeline_empty_candidate_miss_is_explicit() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    repo.create_fact("ck-rust", "rust", 1_000)?;
+    repo.create_fact("ck-rust", "rust", 1_000).await?;
     let mut session = SessionState::new(AgentId::from("agent-1"));
 
-    let outcome = retrieve_chunk(&repo, &mut session, hit_request(2_000))?;
+    let outcome = retrieve_chunk(&repo, &mut session, hit_request(2_000)).await?;
 
     assert_eq!(outcome.status, RetrievalStatus::Miss);
     assert_eq!(
@@ -354,12 +440,12 @@ fn retrieval_pipeline_empty_candidate_miss_is_explicit() -> MemoryResult<()> {
     Ok(())
 }
 
-#[test]
-fn retrieval_pipeline_context_sensitive_spread_reranks_candidates() -> MemoryResult<()> {
+#[tokio::test]
+async fn retrieval_pipeline_context_sensitive_spread_reranks_candidates() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    let context = repo.create_fact("ck-context", "goal", 1_000)?;
-    let weak = repo.create_fact("ck-weak", "act-r", 1_000)?;
-    let strong = repo.create_fact("ck-strong", "act-r", 1_000)?;
+    let context = repo.create_fact("ck-context", "goal", 1_000).await?;
+    let weak = repo.create_fact("ck-weak", "act-r", 1_000).await?;
+    let strong = repo.create_fact("ck-strong", "act-r", 1_000).await?;
     repo.upsert_association(AssociationWrite {
         agent_id: AgentId::from("agent-1"),
         src_chunk_id: context.chunk_id.clone(),
@@ -368,7 +454,8 @@ fn retrieval_pipeline_context_sensitive_spread_reranks_candidates() -> MemoryRes
         strength: 2.0,
         fan: 1,
         updated_at_ms: 2_000,
-    })?;
+    })
+    .await?;
     repo.upsert_association(AssociationWrite {
         agent_id: AgentId::from("agent-1"),
         src_chunk_id: context.chunk_id.clone(),
@@ -377,12 +464,13 @@ fn retrieval_pipeline_context_sensitive_spread_reranks_candidates() -> MemoryRes
         strength: 0.1,
         fan: 1,
         updated_at_ms: 2_000,
-    })?;
+    })
+    .await?;
     let mut session = SessionState::new(AgentId::from("agent-1"));
     let mut request = hit_request(2_000);
     request.context_chunk_ids = vec![context.chunk_id];
 
-    let outcome = retrieve_chunk(&repo, &mut session, request)?;
+    let outcome = retrieve_chunk(&repo, &mut session, request).await?;
 
     assert_eq!(outcome.status, RetrievalStatus::Hit);
     assert_eq!(
@@ -398,10 +486,10 @@ fn retrieval_pipeline_context_sensitive_spread_reranks_candidates() -> MemoryRes
     Ok(())
 }
 
-#[test]
-fn retrieval_pipeline_returns_score_diagnostics_and_reproducible_noise() -> MemoryResult<()> {
+#[tokio::test]
+async fn retrieval_pipeline_returns_score_diagnostics_and_reproducible_noise() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000)?;
+    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000).await?;
     let mut first_session = SessionState::new(AgentId::from("agent-1"));
     let mut second_session = SessionState::new(AgentId::from("agent-1"));
     let mut request = hit_request(5_000);
@@ -409,9 +497,10 @@ fn retrieval_pipeline_returns_score_diagnostics_and_reproducible_noise() -> Memo
     request.activation_params.noise_s = 0.25;
     request.deterministic_seed = Some(42);
     request.mismatch_policy = MismatchPolicy::Exact;
+    request.commit_on_hit = false;
 
-    let first = retrieve_chunk(&repo, &mut first_session, request.clone())?;
-    let second = retrieve_chunk(&repo, &mut second_session, request)?;
+    let first = retrieve_chunk(&repo, &mut first_session, request.clone()).await?;
+    let second = retrieve_chunk(&repo, &mut second_session, request).await?;
 
     assert_eq!(first.status, RetrievalStatus::Hit);
     assert_eq!(first.diagnostics.candidates_examined, 1);
@@ -425,20 +514,26 @@ fn retrieval_pipeline_returns_score_diagnostics_and_reproducible_noise() -> Memo
     assert_eq!(first_score.noise, second_score.noise);
     assert_eq!(first_score.activation, second_score.activation);
     assert_eq!(first_score.partial_match, 0.0);
+    assert_eq!(
+        first.ranked_candidates[0]
+            .practice_input
+            .exact_practice_event_count,
+        1
+    );
     assert!(first_score.retrieval_probability > 0.0);
     assert!(first_score.predicted_latency_ms.is_finite());
     Ok(())
 }
 
-#[test]
-fn retrieval_pipeline_can_rank_without_committing_buffers() -> MemoryResult<()> {
+#[tokio::test]
+async fn retrieval_pipeline_can_rank_without_committing_buffers() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000)?;
+    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000).await?;
     let mut session = SessionState::new(AgentId::from("agent-1"));
     let mut request = hit_request(2_000);
     request.commit_on_hit = false;
 
-    let outcome = retrieve_chunk(&repo, &mut session, request)?;
+    let outcome = retrieve_chunk(&repo, &mut session, request).await?;
 
     assert_eq!(outcome.status, RetrievalStatus::Hit);
     assert_eq!(

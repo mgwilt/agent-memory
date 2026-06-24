@@ -39,6 +39,9 @@ async fn eval(
             candidate_rule_ids: repeated_strings(matches, "candidate-rule"),
             rules: parse_rules_file::<Vec<ProductionRuleDto>>(matches)?.unwrap_or_default(),
             retrieved_chunk_id: matches.get_one::<String>("retrieved").cloned(),
+            selection_policy: "specificity".to_string(),
+            utility_temperature: 1.0,
+            deterministic_seed: None,
         }
     };
     if options.verbose {

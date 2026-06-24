@@ -42,6 +42,8 @@ nestor --agent agent-1 chunk put mem-preference --type fact \
 
 nestor --agent agent-1 practice mem-preference --kind retrieve --weight 2
 
+nestor --agent agent-1 rehearse mem-preference --weight 1
+
 nestor --agent agent-1 associate ctx-goal mem-preference \
   --source goal \
   --strength 1.25
@@ -61,8 +63,21 @@ nestor metrics --grep retrieval_hits
 ```
 
 Commands: [Chunk](./commands.md#chunk), [Practice](./commands.md#practice),
-[Associate](./commands.md#associate), [Buffer Set](./commands.md#buffer-set),
-[Retrieve](./commands.md#retrieve), [Rule Eval](./commands.md#rule-eval).
+[Rehearse](./commands.md#rehearse), [Associate](./commands.md#associate),
+[Buffer Set](./commands.md#buffer-set), [Retrieve](./commands.md#retrieve),
+[Rule Eval](./commands.md#rule-eval).
+
+## Lifecycle Maintenance
+
+```sh
+nestor --agent agent-1 consolidate --type episode --group-slot topic
+
+nestor --agent agent-1 forget --type fact \
+  --recency-cutoff-ms 1000 \
+  --base-level-cutoff -4
+```
+
+Commands: [Consolidate](./commands.md#consolidate), [Forget](./commands.md#forget).
 
 ## JSON-File Driven Workflow
 

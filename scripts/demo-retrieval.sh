@@ -2,7 +2,7 @@
 set -eu
 
 api_url="${NESTOR_API_URL:-http://127.0.0.1:8080}"
-agent_id="${NESTOR_DEMO_AGENT_ID:-demo-agent}"
+agent_id="${NESTOR_DEMO_AGENT_ID:-demo-agent-$$}"
 max_attempts="${NESTOR_DEMO_MAX_ATTEMPTS:-30}"
 tmp_dir="$(mktemp -d)"
 

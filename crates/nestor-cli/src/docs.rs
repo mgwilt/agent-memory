@@ -12,6 +12,9 @@ Command mapping:
   chunk      docs/cli/commands.md#chunk
   retrieve   docs/cli/commands.md#retrieve
   practice   docs/cli/commands.md#practice
+  rehearse   docs/cli/commands.md#rehearse
+  consolidate docs/cli/commands.md#consolidate
+  forget     docs/cli/commands.md#forget
   associate  docs/cli/commands.md#associate
   buffer     docs/cli/commands.md#buffer
   rule       docs/cli/commands.md#rule

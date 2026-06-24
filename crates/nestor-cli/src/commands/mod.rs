@@ -1,9 +1,12 @@
 pub mod associate;
 pub mod buffer;
 pub mod chunk;
+pub mod consolidate;
+pub mod forget;
 pub mod guide;
 pub mod ops;
 pub mod practice;
+pub mod rehearse;
 pub mod retrieve;
 pub mod rule;
 pub mod serve;
@@ -29,6 +32,9 @@ pub async fn dispatch(
         Some(("chunk", matches)) => chunk::run(client, options, matches).await,
         Some(("retrieve", matches)) => retrieve::run(client, options, matches).await,
         Some(("practice", matches)) => practice::run(client, options, matches).await,
+        Some(("rehearse", matches)) => rehearse::run(client, options, matches).await,
+        Some(("consolidate", matches)) => consolidate::run(client, options, matches).await,
+        Some(("forget", matches)) => forget::run(client, options, matches).await,
         Some(("associate", matches)) => associate::run(client, options, matches).await,
         Some(("buffer", matches)) => buffer::run(client, options, matches).await,
         Some(("rule", matches)) => rule::run(client, options, matches).await,

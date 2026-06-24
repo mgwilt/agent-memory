@@ -8,8 +8,10 @@ pub mod service;
 pub use dto::{
     AgentQuery, ApiRetrievalMissReason, ApiRetrievalStatus, AssociateRequest, AssociateResponse,
     BufferResponse, BufferSetRequest, ChunkPatchRequest, ChunkResponse, ChunkUpsertRequest,
-    DeleteResponse, HealthCheckDto, HealthResponse, MetricDto, MetricsResponse, PracticeRequest,
-    PracticeResponse, ProductionRuleDto, RetrievalDiagnostics, RetrievalResult, RetrieveRequest,
+    ConsolidateRequest, ConsolidateResponse, ConsolidationGroupResponse, DeleteResponse,
+    ForgetRequest, ForgetResponse, HealthCheckDto, HealthResponse, MetricDto, MetricsResponse,
+    PracticeRequest, PracticeResponse, ProductionRuleDto, RehearseRequest, RehearseResponse,
+    RetrievalDiagnostics, RetrievalPracticeInputDiagnostics, RetrievalResult, RetrieveRequest,
     RetrieveResponse, RuleCandidateDiagnosticDto, RuleEvaluateRequest, RuleEvaluateResponse,
     RuleMatchDto, ScoreComponents, SlotDto, SlotValueDto,
 };

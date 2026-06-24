@@ -7,14 +7,18 @@ use std::{
     },
 };
 
-use nestor_core::{AgentId, Chunk, ChunkId, MemoryError, MemoryResult, PracticeEvent, Slot};
-use nestor_ops::MetricSample;
+use nestor_core::{
+    AgentId, Chunk, ChunkId, MemoryError, MemoryResult, PracticeEvent, Slot, SlotValue,
+    base_level_activation,
+};
+use nestor_ops::{MetricSample, RepositoryBackend, RuntimeConfig};
 use nestor_rules::{RuleEngine, RuleId};
 use nestor_session::{BufferName, BufferSnapshot, SessionRegistry};
 use nestor_store::{
-    AssociationWrite, BufferSetCurrent, CandidateQuery, ChunkWithHistory, CreateChunk,
-    MemoryRepository, PracticeEventWrite, ProductionRuleRecord as StoreProductionRuleRecord,
-    UpdateChunk,
+    AssociationWrite, BufferSetCurrent, CandidateQuery, ChunkWithHistory, ConsolidateRequest,
+    ConsolidationGroupReport, ConsolidationReport, CreateChunk, ForgetReport, ForgetRequest,
+    MemgraphRepository, MemgraphRepositoryConfig, MemoryRepository, PracticeEventWrite,
+    ProductionRuleRecord as StoreProductionRuleRecord, RetrievalPracticeWrite, UpdateChunk,
 };
 
 #[derive(Debug, Clone)]
@@ -22,6 +26,7 @@ struct StoredChunkState {
     chunk: Chunk,
     version: u64,
     active: bool,
+    base_level_cache_stale: bool,
 }
 
 #[derive(Debug, Default)]
@@ -62,6 +67,7 @@ impl ApiRepository {
                 chunk: req.chunk.clone(),
                 version: 1,
                 active: true,
+                base_level_cache_stale: false,
             },
         );
         Ok(req.chunk)
@@ -80,8 +86,9 @@ impl ApiRepository {
     }
 }
 
+#[async_trait::async_trait]
 impl MemoryRepository for ApiRepository {
-    fn create_chunk(&self, req: CreateChunk) -> MemoryResult<Chunk> {
+    async fn create_chunk(&self, req: CreateChunk) -> MemoryResult<Chunk> {
         req.validate()?;
         let key = (req.chunk.agent_id.clone(), req.chunk.chunk_id.clone());
         let practice = PracticeEventWrite {
@@ -110,12 +117,21 @@ impl MemoryRepository for ApiRepository {
                 chunk: req.chunk.clone(),
                 version: 1,
                 active: true,
+                base_level_cache_stale: false,
             },
         );
         Ok(req.chunk)
     }
 
-    fn get_chunk(&self, agent_id: &AgentId, chunk_id: &ChunkId) -> MemoryResult<Option<Chunk>> {
+    async fn upsert_chunk(&self, req: CreateChunk) -> MemoryResult<Chunk> {
+        ApiRepository::upsert_chunk(self, req)
+    }
+
+    async fn get_chunk(
+        &self,
+        agent_id: &AgentId,
+        chunk_id: &ChunkId,
+    ) -> MemoryResult<Option<Chunk>> {
         let store = lock_store(&self.inner)?;
         Ok(store
             .chunks
@@ -124,7 +140,7 @@ impl MemoryRepository for ApiRepository {
             .map(|stored| stored.chunk.clone()))
     }
 
-    fn update_chunk(&self, req: UpdateChunk) -> MemoryResult<Chunk> {
+    async fn update_chunk(&self, req: UpdateChunk) -> MemoryResult<Chunk> {
         req.validate()?;
         let key = (req.agent_id.clone(), req.chunk_id.clone());
         let mut store = lock_store(&self.inner)?;
@@ -149,7 +165,7 @@ impl MemoryRepository for ApiRepository {
         Ok(stored.chunk.clone())
     }
 
-    fn soft_delete_chunk(&self, agent_id: &AgentId, chunk_id: &ChunkId) -> MemoryResult<()> {
+    async fn soft_delete_chunk(&self, agent_id: &AgentId, chunk_id: &ChunkId) -> MemoryResult<()> {
         let mut store = lock_store(&self.inner)?;
         let stored = store
             .chunks
@@ -160,7 +176,7 @@ impl MemoryRepository for ApiRepository {
         Ok(())
     }
 
-    fn append_practice_event(&self, req: PracticeEventWrite) -> MemoryResult<()> {
+    async fn append_practice_event(&self, req: PracticeEventWrite) -> MemoryResult<()> {
         req.validate()?;
         let mut store = lock_store(&self.inner)?;
         active_chunk_from_store(&store, &req.agent_id, &req.chunk_id)?;
@@ -170,11 +186,44 @@ impl MemoryRepository for ApiRepository {
                 req.event_id
             )));
         }
+        if let Some(stored) = store
+            .chunks
+            .get_mut(&(req.agent_id.clone(), req.chunk_id.clone()))
+        {
+            stored.base_level_cache_stale = true;
+        }
         store.practice_events.insert(req.event_id.clone(), req);
         Ok(())
     }
 
-    fn fetch_candidates(&self, req: CandidateQuery) -> MemoryResult<Vec<ChunkWithHistory>> {
+    async fn record_successful_retrieval(&self, req: RetrievalPracticeWrite) -> MemoryResult<()> {
+        req.validate()?;
+        let event = PracticeEventWrite {
+            event_id: req.event_id,
+            agent_id: req.agent_id,
+            chunk_id: req.chunk_id,
+            occurred_at_ms: req.occurred_at_ms,
+            kind: "retrieve".to_string(),
+            weight: req.weight,
+        };
+        event.validate()?;
+        let mut store = lock_store(&self.inner)?;
+        if store.practice_events.contains_key(&event.event_id) {
+            return Err(MemoryError::Conflict(format!(
+                "practice event {} already exists",
+                event.event_id
+            )));
+        }
+        {
+            let chunk = active_chunk_from_store_mut(&mut store, &event.agent_id, &event.chunk_id)?;
+            chunk.chunk.record_retrieval(event.occurred_at_ms);
+            chunk.base_level_cache_stale = true;
+        }
+        store.practice_events.insert(event.event_id.clone(), event);
+        Ok(())
+    }
+
+    async fn fetch_candidates(&self, req: CandidateQuery) -> MemoryResult<Vec<ChunkWithHistory>> {
         req.validate()?;
         let store = lock_store(&self.inner)?;
         let mut candidates = store
@@ -230,6 +279,7 @@ impl MemoryRepository for ApiRepository {
                     spread_score,
                     stored.chunk.clone(),
                     practice_events,
+                    stored.base_level_cache_stale,
                 ))
             })
             .collect::<Vec<_>>();
@@ -246,16 +296,19 @@ impl MemoryRepository for ApiRepository {
             .into_iter()
             .take(req.candidate_limit)
             .map(
-                |(_, spread_score, chunk, practice_events)| ChunkWithHistory {
-                    chunk,
-                    practice_events,
-                    spread_score,
+                |(_, spread_score, chunk, practice_events, base_level_cache_stale)| {
+                    ChunkWithHistory {
+                        chunk,
+                        practice_events,
+                        spread_score,
+                        base_level_cache_stale,
+                    }
                 },
             )
             .collect())
     }
 
-    fn upsert_association(&self, req: AssociationWrite) -> MemoryResult<()> {
+    async fn upsert_association(&self, req: AssociationWrite) -> MemoryResult<()> {
         req.validate()?;
         let mut store = lock_store(&self.inner)?;
         active_chunk_from_store(&store, &req.agent_id, &req.src_chunk_id)?;
@@ -272,7 +325,7 @@ impl MemoryRepository for ApiRepository {
         Ok(())
     }
 
-    fn set_buffer_current(&self, req: BufferSetCurrent) -> MemoryResult<()> {
+    async fn set_buffer_current(&self, req: BufferSetCurrent) -> MemoryResult<()> {
         req.validate()?;
         let mut store = lock_store(&self.inner)?;
         active_chunk_from_store(&store, &req.agent_id, &req.chunk_id)?;
@@ -283,7 +336,7 @@ impl MemoryRepository for ApiRepository {
         Ok(())
     }
 
-    fn upsert_production_rule(
+    async fn upsert_production_rule(
         &self,
         req: StoreProductionRuleRecord,
     ) -> MemoryResult<StoreProductionRuleRecord> {
@@ -296,7 +349,7 @@ impl MemoryRepository for ApiRepository {
         Ok(req)
     }
 
-    fn get_production_rule(
+    async fn get_production_rule(
         &self,
         agent_id: &AgentId,
         rule_id: &RuleId,
@@ -306,6 +359,190 @@ impl MemoryRepository for ApiRepository {
             .rules
             .get(&(agent_id.clone(), rule_id.clone()))
             .cloned())
+    }
+
+    async fn consolidate(&self, req: ConsolidateRequest) -> MemoryResult<ConsolidationReport> {
+        req.validate()?;
+        let group_keys = effective_group_slot_keys(&req.group_slot_keys);
+        let mut groups = BTreeMap::<String, Vec<Chunk>>::new();
+        {
+            let store = lock_store(&self.inner)?;
+            for stored in store.chunks.values().filter(|stored| stored.active) {
+                if stored.chunk.agent_id != req.agent_id {
+                    continue;
+                }
+                if req
+                    .chunk_type
+                    .as_ref()
+                    .is_some_and(|chunk_type| &stored.chunk.chunk_type != chunk_type)
+                {
+                    continue;
+                }
+                if is_bool_slot(&stored.chunk, "consolidated") {
+                    continue;
+                }
+                if let Some(key) = consolidation_group_key(&stored.chunk, &group_keys) {
+                    groups.entry(key).or_default().push(stored.chunk.clone());
+                }
+            }
+        }
+
+        let groups_considered = groups.len();
+        let mut summaries = Vec::new();
+        let mut store = lock_store(&self.inner)?;
+        for (group_key, mut group_chunks) in groups {
+            if group_chunks.len() < req.min_group_size {
+                continue;
+            }
+            group_chunks.sort_by(|left, right| left.chunk_id.cmp(&right.chunk_id));
+            let source_chunk_ids = group_chunks
+                .iter()
+                .map(|chunk| chunk.chunk_id.clone())
+                .collect::<Vec<_>>();
+            let summary_id = ChunkId::from(format!(
+                "summary-{}",
+                stable_hex_hash(&[
+                    req.agent_id.as_str(),
+                    req.summary_chunk_type.as_str(),
+                    &group_key
+                ])
+            ));
+            let mut summary = Chunk::new(
+                req.agent_id.clone(),
+                summary_id.clone(),
+                req.summary_chunk_type.clone(),
+                req.now_ms,
+            );
+            for key in &group_keys {
+                if let Some(value) = group_chunks[0].slot(key).cloned() {
+                    summary.upsert_slot(key.clone(), value);
+                }
+            }
+            summary.upsert_slot(
+                "source_count",
+                SlotValue::Number(source_chunk_ids.len() as f64),
+            );
+            summary.upsert_slot("consolidation_key", SlotValue::Text(group_key));
+            store.chunks.insert(
+                (req.agent_id.clone(), summary_id.clone()),
+                StoredChunkState {
+                    chunk: summary,
+                    version: 1,
+                    active: true,
+                    base_level_cache_stale: false,
+                },
+            );
+            for chunk_id in &source_chunk_ids {
+                if let Some(stored) = store
+                    .chunks
+                    .get_mut(&(req.agent_id.clone(), chunk_id.clone()))
+                {
+                    stored
+                        .chunk
+                        .upsert_slot("consolidated", SlotValue::Bool(true));
+                    stored.chunk.updated_at_ms = req.now_ms;
+                }
+                store.associations.insert(
+                    (
+                        req.agent_id.clone(),
+                        summary_id.clone(),
+                        chunk_id.clone(),
+                        "consolidation".to_string(),
+                    ),
+                    AssociationWrite {
+                        agent_id: req.agent_id.clone(),
+                        src_chunk_id: summary_id.clone(),
+                        dst_chunk_id: chunk_id.clone(),
+                        source: "consolidation".to_string(),
+                        strength: 1.0,
+                        fan: source_chunk_ids.len() as u64,
+                        updated_at_ms: req.now_ms,
+                    },
+                );
+            }
+            summaries.push(ConsolidationGroupReport {
+                summary_chunk_id: summary_id,
+                source_chunk_ids,
+            });
+        }
+
+        Ok(ConsolidationReport {
+            agent_id: req.agent_id,
+            groups_considered,
+            groups_consolidated: summaries.len(),
+            summaries,
+        })
+    }
+
+    async fn forget(&self, req: ForgetRequest) -> MemoryResult<ForgetReport> {
+        req.validate()?;
+        let mut store = lock_store(&self.inner)?;
+        let mut examined = 0;
+        let mut forgotten_chunk_ids = Vec::new();
+        let mut archived_chunk_ids = Vec::new();
+        let mut protected_chunk_ids = Vec::new();
+        let event_values = store.practice_events.values().cloned().collect::<Vec<_>>();
+        let association_values = store.associations.values().cloned().collect::<Vec<_>>();
+
+        for ((agent_id, chunk_id), stored) in store.chunks.iter_mut() {
+            if *agent_id != req.agent_id || !stored.active {
+                continue;
+            }
+            if req
+                .chunk_type
+                .as_ref()
+                .is_some_and(|chunk_type| &stored.chunk.chunk_type != chunk_type)
+            {
+                continue;
+            }
+            examined += 1;
+            if is_bool_slot(&stored.chunk, "protected") {
+                protected_chunk_ids.push(chunk_id.clone());
+                continue;
+            }
+            let chunk_events = event_values
+                .iter()
+                .filter(|event| event.agent_id == *agent_id && event.chunk_id == *chunk_id)
+                .map(|event| PracticeEvent {
+                    occurred_at_ms: event.occurred_at_ms,
+                    weight: event.weight,
+                })
+                .collect::<Vec<_>>();
+            let last_practiced_at = chunk_events
+                .iter()
+                .map(|event| event.occurred_at_ms)
+                .max()
+                .unwrap_or(stored.chunk.updated_at_ms);
+            if last_practiced_at > req.recency_cutoff_ms {
+                continue;
+            }
+            let base_level = base_level_activation(&chunk_events, req.now_ms, 0.5);
+            if base_level >= req.base_level_cutoff {
+                continue;
+            }
+            let linked = association_values.iter().any(|association| {
+                association.agent_id == *agent_id
+                    && (association.src_chunk_id == *chunk_id
+                        || association.dst_chunk_id == *chunk_id)
+            });
+            if linked && !req.allow_linked_forget {
+                stored.chunk.upsert_slot("archived", SlotValue::Bool(true));
+                stored.chunk.updated_at_ms = req.now_ms;
+                archived_chunk_ids.push(chunk_id.clone());
+            } else {
+                stored.active = false;
+                stored.chunk.updated_at_ms = req.now_ms;
+                forgotten_chunk_ids.push(chunk_id.clone());
+            }
+        }
+
+        Ok(ForgetReport {
+            agent_id: req.agent_id,
+            examined,
+            forgotten_chunk_ids,
+            archived_chunk_ids,
+            protected_chunk_ids,
+        })
     }
 }
 
@@ -423,16 +660,39 @@ impl ApiCounters {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 pub struct ApiState {
-    pub repository: ApiRepository,
+    pub repository: Arc<dyn MemoryRepository + Send + Sync>,
     pub sessions: Arc<SessionRegistry>,
     pub counters: Arc<ApiCounters>,
 }
 
 impl ApiState {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_repository(ApiRepository::default())
+    }
+
+    pub fn with_repository(repository: impl MemoryRepository + Send + Sync + 'static) -> Self {
+        Self {
+            repository: Arc::new(repository),
+            sessions: Arc::new(SessionRegistry::default()),
+            counters: Arc::new(ApiCounters::default()),
+        }
+    }
+
+    pub async fn from_config(config: &RuntimeConfig) -> MemoryResult<Self> {
+        match config.repository_backend {
+            RepositoryBackend::Memgraph => {
+                let password = config
+                    .resolve_memgraph_password()
+                    .map_err(MemoryError::Validation)?;
+                let repository =
+                    MemgraphRepository::connect(memgraph_repository_config(config, password))
+                        .await?;
+                Ok(Self::with_repository(repository))
+            }
+            RepositoryBackend::InMemory => Ok(Self::new()),
+        }
     }
 
     pub fn session_snapshot(&self, agent_id: AgentId) -> MemoryResult<Vec<BufferSnapshot>> {
@@ -441,6 +701,12 @@ impl ApiState {
 
     pub fn rule_engine(&self, rules: Vec<nestor_rules::ProductionRule>) -> RuleEngine {
         RuleEngine::new(rules)
+    }
+}
+
+impl Default for ApiState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -463,6 +729,18 @@ fn active_chunk_from_store(
         .ok_or_else(|| MemoryError::NotFound(format!("chunk {}", chunk_id.as_str())))
 }
 
+fn active_chunk_from_store_mut<'a>(
+    store: &'a mut MemoryStore,
+    agent_id: &AgentId,
+    chunk_id: &ChunkId,
+) -> MemoryResult<&'a mut StoredChunkState> {
+    store
+        .chunks
+        .get_mut(&(agent_id.clone(), chunk_id.clone()))
+        .filter(|stored| stored.active)
+        .ok_or_else(|| MemoryError::NotFound(format!("chunk {}", chunk_id.as_str())))
+}
+
 fn normalized_cue_match_count(chunk: &Chunk, cues: &[Slot]) -> usize {
     cues.iter()
         .filter(|cue| {
@@ -472,6 +750,47 @@ fn normalized_cue_match_count(chunk: &Chunk, cues: &[Slot]) -> usize {
             })
         })
         .count()
+}
+
+fn effective_group_slot_keys(keys: &[String]) -> Vec<String> {
+    if keys.is_empty() {
+        vec![
+            "topic".to_string(),
+            "subject".to_string(),
+            "entity".to_string(),
+        ]
+    } else {
+        keys.iter().map(|key| key.trim().to_string()).collect()
+    }
+}
+
+fn consolidation_group_key(chunk: &Chunk, keys: &[String]) -> Option<String> {
+    let mut parts = Vec::new();
+    for key in keys {
+        if let Some(value) = chunk.slot(key) {
+            parts.push(format!(
+                "{key}={}:{}",
+                value.value_type(),
+                value.normalized()
+            ));
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("|"))
+}
+
+fn is_bool_slot(chunk: &Chunk, key: &str) -> bool {
+    matches!(chunk.slot(key), Some(SlotValue::Bool(true)))
+}
+
+fn stable_hex_hash(parts: &[&str]) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for part in parts {
+        for byte in part.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{hash:016x}")
 }
 
 fn milliseconds_to_microseconds(value: f64) -> u64 {
@@ -487,4 +806,65 @@ fn milliseconds_to_microseconds(value: f64) -> u64 {
 
 fn microseconds_to_milliseconds(value: u64) -> f64 {
     value as f64 / 1_000.0
+}
+
+fn memgraph_repository_config(
+    config: &RuntimeConfig,
+    password: String,
+) -> MemgraphRepositoryConfig {
+    MemgraphRepositoryConfig {
+        uri: config.memgraph_uri.clone(),
+        user: config.memgraph_user.clone(),
+        password,
+        database: "memgraph".to_string(),
+        max_connections: config.memgraph_max_connections,
+        tls_ca_file: config.memgraph_security.tls_ca_file.clone(),
+        schema_info_enabled: true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nestor_ops::{MemgraphSecurityConfig, RepositoryBackend, RuntimeConfig};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn from_config_uses_explicit_in_memory_backend() -> MemoryResult<()> {
+        let config = RuntimeConfig {
+            repository_backend: RepositoryBackend::InMemory,
+            ..RuntimeConfig::default()
+        };
+
+        let state = ApiState::from_config(&config).await?;
+
+        state.repository.health_check().await
+    }
+
+    #[test]
+    fn memgraph_config_mapping_preserves_runtime_settings() {
+        let config = RuntimeConfig {
+            memgraph_uri: "bolt+s://memgraph.example:7687".to_string(),
+            memgraph_user: "nestor".to_string(),
+            memgraph_max_connections: 7,
+            memgraph_security: MemgraphSecurityConfig {
+                tls_ca_file: Some("/etc/nestor/memgraph-ca.pem".to_string()),
+                ..RuntimeConfig::default().memgraph_security
+            },
+            ..RuntimeConfig::default()
+        };
+
+        let repository_config = memgraph_repository_config(&config, "secret".to_string());
+
+        assert_eq!(repository_config.uri, "bolt+s://memgraph.example:7687");
+        assert_eq!(repository_config.user, "nestor");
+        assert_eq!(repository_config.password, "secret");
+        assert_eq!(repository_config.database, "memgraph");
+        assert_eq!(repository_config.max_connections, 7);
+        assert_eq!(
+            repository_config.tls_ca_file.as_deref(),
+            Some("/etc/nestor/memgraph-ca.pem")
+        );
+        assert!(repository_config.schema_info_enabled);
+    }
 }

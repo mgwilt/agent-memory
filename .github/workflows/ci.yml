@@ -18,3 +18,16 @@ jobs:
       - run: cargo check --workspace --all-targets
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: docker compose up -d memgraph
+      - run: ./scripts/wait-for-memgraph.sh
+      - run: ./scripts/bootstrap-memgraph.sh
+      - run: ./scripts/bootstrap-memgraph.sh
+      - run: NESTOR_STORE_MEMGRAPH_TESTS=1 cargo test -p nestor-store --test memgraph_repository_live -- --nocapture
+      - run: NESTOR_STORE_MEMGRAPH_TESTS=1 cargo test -p nestor-store --test memgraph_live -- --nocapture
+      - run: NESTOR_STORE_MEMGRAPH_TESTS=1 cargo test -p nestor-api --test memgraph_runtime -- --nocapture
+      - run: docker compose build api
+      - run: docker compose up -d api
+      - run: NESTOR_DEMO_AGENT_ID=demo-retrieval-${{ github.run_id }} ./scripts/demo-retrieval.sh
+      - run: ./scripts/demo-lifecycle.sh
+      - if: always()
+        run: docker compose down -v

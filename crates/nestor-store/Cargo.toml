@@ -9,9 +9,15 @@ rust-version.workspace = true
 nestor-core.workspace = true
 nestor-session.workspace = true
 nestor-rules.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+neo4rs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+tokio.workspace = true
 
 [[bench]]
 name = "activation_retrieval"

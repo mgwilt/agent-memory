@@ -2,15 +2,17 @@ use std::time::Instant;
 
 use nestor_core::{
     ActivationInput, ActivationOutput, ActivationParams, AgentId, Chunk, ChunkId, MemoryError,
-    MemoryResult, PartialMatchingParams, Slot, SlotSimilarity, deterministic_noise,
+    MemoryResult, PartialMatchingParams, PracticeEvent, Slot, SlotSimilarity, deterministic_noise,
     exact_slot_match_score, partial_match_score_with_similarities, score_activation,
 };
 use nestor_session::{BufferName, SessionState};
 
 use crate::repository::{
     BufferSetCurrent, CandidateQuery, ChunkWithHistory, DEFAULT_CANDIDATE_LIMIT, MemoryRepository,
-    StoredSlot, bounded_candidate_limit,
+    RetrievalPracticeWrite, StoredSlot, bounded_candidate_limit,
 };
+
+pub const MAX_EXACT_PRACTICE_EVENTS: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetrievalStatus {
@@ -143,6 +145,15 @@ pub struct RankedRetrievalCandidate {
     pub chunk: Chunk,
     pub score: RetrievalScoreBreakdown,
     pub practice_event_count: usize,
+    pub practice_input: PracticeInputDiagnostics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PracticeInputDiagnostics {
+    pub total_practice_event_count: usize,
+    pub exact_practice_event_count: usize,
+    pub compressed_practice_bin_count: usize,
+    pub base_level_cache_stale: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -179,16 +190,35 @@ pub struct RetrievalOutcome {
     pub diagnostics: RetrievalDiagnostics,
 }
 
-pub fn retrieve_chunk<R: MemoryRepository>(
+pub async fn retrieve_chunk<R: MemoryRepository + ?Sized>(
     repository: &R,
     session: &mut SessionState,
+    request: RetrievalRequest,
+) -> MemoryResult<RetrievalOutcome> {
+    let commit_on_hit = request.commit_on_hit;
+    let commit_at_ms = request.now_ms;
+    let outcome = retrieve_chunk_outcome(repository, request).await?;
+    if commit_on_hit {
+        if let Some(hit) = outcome.hit.as_ref() {
+            session.commit_retrieval(
+                hit.chunk.chunk_id.clone(),
+                hit.chunk.chunk_type.clone(),
+                commit_at_ms,
+            );
+        }
+    }
+    Ok(outcome)
+}
+
+pub async fn retrieve_chunk_outcome<R: MemoryRepository + ?Sized>(
+    repository: &R,
     request: RetrievalRequest,
 ) -> MemoryResult<RetrievalOutcome> {
     request.validate()?;
     let query = request.candidate_query();
     query.validate()?;
     let normalized_cue_slots = query.normalized_cue_slots();
-    let candidates = repository.fetch_candidates(query)?;
+    let candidates = repository.fetch_candidates(query).await?;
     let activation_started = Instant::now();
     let ranked_candidates = rank_retrieval_candidates(candidates, &request);
     let activation_compute_ms = activation_started.elapsed().as_secs_f64() * 1_000.0;
@@ -233,17 +263,23 @@ pub fn retrieve_chunk<R: MemoryRepository>(
     }
 
     if request.commit_on_hit {
-        repository.set_buffer_current(BufferSetCurrent {
-            agent_id: request.agent_id.clone(),
-            buffer_name: BufferName::Retrieval,
-            chunk_id: best.chunk.chunk_id.clone(),
-            set_at_ms: request.now_ms,
-        })?;
-        session.commit_retrieval(
-            best.chunk.chunk_id.clone(),
-            best.chunk.chunk_type.clone(),
-            request.now_ms,
-        );
+        repository
+            .set_buffer_current(BufferSetCurrent {
+                agent_id: request.agent_id.clone(),
+                buffer_name: BufferName::Retrieval,
+                chunk_id: best.chunk.chunk_id.clone(),
+                set_at_ms: request.now_ms,
+            })
+            .await?;
+        repository
+            .record_successful_retrieval(RetrievalPracticeWrite {
+                event_id: retrieval_event_id(&request, best),
+                agent_id: request.agent_id.clone(),
+                chunk_id: best.chunk.chunk_id.clone(),
+                occurred_at_ms: request.now_ms,
+                weight: 1.0,
+            })
+            .await?;
     }
 
     Ok(RetrievalOutcome {
@@ -266,6 +302,7 @@ fn rank_retrieval_candidates(
     let mut scored = candidates
         .into_iter()
         .map(|candidate| {
+            let (activation_events, practice_input) = bounded_practice_history(&candidate);
             let partial_match_score = mismatch_score(&candidate.chunk, request);
             let noise = request.deterministic_seed.map_or(0.0, |seed| {
                 deterministic_noise(
@@ -276,7 +313,7 @@ fn rank_retrieval_candidates(
             });
             let output = score_activation(&ActivationInput {
                 now_ms: request.now_ms,
-                practice_events: candidate.practice_events.clone(),
+                practice_events: activation_events,
                 spread_score: candidate.spread_score,
                 partial_match_score,
                 noise,
@@ -286,7 +323,8 @@ fn rank_retrieval_candidates(
             RankedRetrievalCandidate {
                 chunk: candidate.chunk,
                 score: output.into(),
-                practice_event_count: candidate.practice_events.len(),
+                practice_event_count: practice_input.total_practice_event_count,
+                practice_input,
             }
         })
         .collect::<Vec<_>>();
@@ -299,6 +337,69 @@ fn rank_retrieval_candidates(
             .then_with(|| left.chunk.chunk_id.cmp(&right.chunk.chunk_id))
     });
     scored
+}
+
+fn retrieval_event_id(request: &RetrievalRequest, best: &RankedRetrievalCandidate) -> String {
+    format!(
+        "retrieve-{}-{}-{}-{}",
+        request.agent_id.as_str(),
+        best.chunk.chunk_id.as_str(),
+        request.now_ms,
+        best.practice_event_count
+    )
+}
+
+fn bounded_practice_history(
+    candidate: &ChunkWithHistory,
+) -> (Vec<PracticeEvent>, PracticeInputDiagnostics) {
+    let mut events = candidate.practice_events.clone();
+    events.sort_by(|left, right| right.occurred_at_ms.cmp(&left.occurred_at_ms));
+    let total_practice_event_count = events.len();
+    let exact_practice_event_count = total_practice_event_count.min(MAX_EXACT_PRACTICE_EVENTS);
+    let mut activation_events = events
+        .iter()
+        .take(MAX_EXACT_PRACTICE_EVENTS)
+        .copied()
+        .collect::<Vec<_>>();
+    let older = events
+        .into_iter()
+        .skip(MAX_EXACT_PRACTICE_EVENTS)
+        .collect::<Vec<_>>();
+    let compressed = compress_older_practice_events(older);
+    let compressed_practice_bin_count = compressed.len();
+    activation_events.extend(compressed);
+
+    (
+        activation_events,
+        PracticeInputDiagnostics {
+            total_practice_event_count,
+            exact_practice_event_count,
+            compressed_practice_bin_count,
+            base_level_cache_stale: candidate.base_level_cache_stale,
+        },
+    )
+}
+
+fn compress_older_practice_events(events: Vec<PracticeEvent>) -> Vec<PracticeEvent> {
+    use std::collections::BTreeMap;
+
+    const BUCKET_MS: u64 = 86_400_000;
+    let mut bins = BTreeMap::<u64, (u64, f64, u64)>::new();
+    for event in events {
+        let bucket = event.occurred_at_ms / BUCKET_MS;
+        let entry = bins.entry(bucket).or_insert((0, 0.0, 0));
+        entry.0 = entry.0.saturating_add(event.occurred_at_ms);
+        entry.1 += event.weight;
+        entry.2 = entry.2.saturating_add(1);
+    }
+
+    bins.into_values()
+        .filter(|(_, _, count)| *count > 0)
+        .map(|(occurred_sum, weight_sum, count)| PracticeEvent {
+            occurred_at_ms: occurred_sum / count,
+            weight: weight_sum,
+        })
+        .collect()
 }
 
 fn mismatch_score(candidate: &Chunk, request: &RetrievalRequest) -> f64 {
@@ -353,6 +454,7 @@ mod tests {
                 ),
                 practice_events: vec![PracticeEvent::new(1_000)],
                 spread_score: 0.0,
+                base_level_cache_stale: false,
             },
             ChunkWithHistory {
                 chunk: Chunk::new(
@@ -363,6 +465,7 @@ mod tests {
                 ),
                 practice_events: vec![PracticeEvent::new(1_000)],
                 spread_score: 0.0,
+                base_level_cache_stale: false,
             },
         ];
 

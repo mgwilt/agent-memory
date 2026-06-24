@@ -11,10 +11,11 @@ use nestor_core::{
     ActivationParams, AgentId, Chunk, ChunkId, ChunkType, MemoryError, MemoryResult, Slot,
 };
 use nestor_ops::{HealthCheck, HealthStatus, RuntimeConfig, render_prometheus_metrics};
-use nestor_rules::RuleId;
+use nestor_rules::{RuleId, RuleSelectionPolicy};
 use nestor_store::{
-    AssociationWrite, BufferSetCurrent, CreateChunk, MemoryRepository, MismatchPolicy,
-    PracticeEventWrite, RetrievalRequest as StoreRetrievalRequest, UpdateChunk, retrieve_chunk,
+    AssociationWrite, BufferSetCurrent, ConsolidateRequest as StoreConsolidateRequest, CreateChunk,
+    ForgetRequest as StoreForgetRequest, MismatchPolicy, PracticeEventWrite,
+    RetrievalRequest as StoreRetrievalRequest, UpdateChunk, retrieve_chunk_outcome,
 };
 
 use crate::{
@@ -74,6 +75,21 @@ pub fn route_manifest() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
+            path: "/v1/memory/rehearse",
+            purpose: "record a first-class rehearsal event",
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/v1/memory/consolidate",
+            purpose: "merge overlapping episodic chunks into summaries",
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/v1/memory/forget",
+            purpose: "apply policy-driven soft delete or archive",
+        },
+        RouteSpec {
+            method: "POST",
             path: "/v1/memory/associate",
             purpose: "add or update spreading-activation association",
         },
@@ -119,6 +135,9 @@ pub fn app_with_state(state: ApiState) -> Router {
         .route("/v1/memory/retrieve", post(retrieve_memory))
         .route("/v1/memory/retrieve/stream", post(retrieve_memory))
         .route("/v1/memory/practice", post(record_practice))
+        .route("/v1/memory/rehearse", post(rehearse_memory))
+        .route("/v1/memory/consolidate", post(consolidate_memory))
+        .route("/v1/memory/forget", post(forget_memory))
         .route("/v1/memory/associate", post(upsert_association))
         .route("/v1/memory/buffers/{buffer_name}", put(set_buffer))
         .route("/v1/rules/evaluate", post(evaluate_rules))
@@ -130,8 +149,9 @@ pub fn app_with_state(state: ApiState) -> Router {
 
 pub async fn serve(config: RuntimeConfig) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     config.validate().map_err(MemoryError::Validation)?;
+    let state = ApiState::from_config(&config).await?;
     let listener = tokio::net::TcpListener::bind(&config.bind_addr).await?;
-    axum::serve(listener, app()).await?;
+    axum::serve(listener, app_with_state(state)).await?;
     Ok(())
 }
 
@@ -170,6 +190,7 @@ async fn upsert_chunk(
                 chunk,
                 initial_practice_event_id: event_id,
             })
+            .await
             .map(ChunkResponse::from),
     )?;
     Ok(Json(response))
@@ -187,7 +208,8 @@ async fn get_chunk(
         .get_chunk(
             &AgentId::from(query.agent_id),
             &ChunkId::from(chunk_id.clone()),
-        )?
+        )
+        .await?
         .ok_or_else(|| MemoryError::NotFound(format!("chunk {chunk_id}")))?;
     Ok(Json(ChunkResponse::from(chunk)))
 }
@@ -212,12 +234,15 @@ async fn patch_chunk(
         .collect::<Result<Vec<_>, ApiProblem>>()?;
     let chunk = track_memory_result(
         &state,
-        state.repository.update_chunk(UpdateChunk {
-            agent_id: AgentId::from(req.agent_id),
-            chunk_id: ChunkId::from(chunk_id),
-            expected_version: req.expected_version,
-            slots,
-        }),
+        state
+            .repository
+            .update_chunk(UpdateChunk {
+                agent_id: AgentId::from(req.agent_id),
+                chunk_id: ChunkId::from(chunk_id),
+                expected_version: req.expected_version,
+                slots,
+            })
+            .await,
     )?;
     Ok(Json(ChunkResponse::from(chunk)))
 }
@@ -231,10 +256,13 @@ async fn delete_chunk(
     validate_non_empty("chunk_id", &chunk_id)?;
     track_memory_result(
         &state,
-        state.repository.soft_delete_chunk(
-            &AgentId::from(query.agent_id.clone()),
-            &ChunkId::from(chunk_id.clone()),
-        ),
+        state
+            .repository
+            .soft_delete_chunk(
+                &AgentId::from(query.agent_id.clone()),
+                &ChunkId::from(chunk_id.clone()),
+            )
+            .await,
     )?;
     Ok(Json(DeleteResponse {
         deleted: true,
@@ -277,18 +305,32 @@ async fn retrieve_memory(
     retrieval.commit_on_hit = req.commit_on_hit;
 
     let retrieval_started = Instant::now();
-    let observed = track_memory_result(
+    let agent_id_for_session = AgentId::from(req.agent_id.clone());
+    let commit_on_hit = req.commit_on_hit;
+    let outcome = track_memory_result(
         &state,
-        state
-            .sessions
-            .with_session_observed(AgentId::from(req.agent_id), |session| {
-                retrieve_chunk(&state.repository, session, retrieval)
-            }),
+        retrieve_chunk_outcome(state.repository.as_ref(), retrieval).await,
     )?;
-    if observed.contended {
-        state.counters.record_session_lock_contention();
+    if commit_on_hit {
+        if let Some(hit) = outcome.hit.as_ref() {
+            let observed = track_memory_result(
+                &state,
+                state
+                    .sessions
+                    .with_session_observed(agent_id_for_session, |session| {
+                        session.commit_retrieval(
+                            hit.chunk.chunk_id.clone(),
+                            hit.chunk.chunk_type.clone(),
+                            req.now_ms,
+                        );
+                        Ok(())
+                    }),
+            )?;
+            if observed.contended {
+                state.counters.record_session_lock_contention();
+            }
+        }
     }
-    let outcome = observed.output;
     state.counters.record_retrieval_observation(
         retrieval_started.elapsed().as_secs_f64() * 1_000.0,
         outcome.diagnostics.candidates_examined,
@@ -320,14 +362,17 @@ async fn record_practice(
     });
     track_memory_result(
         &state,
-        state.repository.append_practice_event(PracticeEventWrite {
-            event_id: event_id.clone(),
-            agent_id: AgentId::from(req.agent_id.clone()),
-            chunk_id: ChunkId::from(req.chunk_id.clone()),
-            occurred_at_ms: req.occurred_at_ms,
-            kind: req.kind.clone(),
-            weight: req.weight,
-        }),
+        state
+            .repository
+            .append_practice_event(PracticeEventWrite {
+                event_id: event_id.clone(),
+                agent_id: AgentId::from(req.agent_id.clone()),
+                chunk_id: ChunkId::from(req.chunk_id.clone()),
+                occurred_at_ms: req.occurred_at_ms,
+                kind: req.kind.clone(),
+                weight: req.weight,
+            })
+            .await,
     )?;
     Ok(Json(PracticeResponse {
         event_id,
@@ -336,6 +381,86 @@ async fn record_practice(
         kind: req.kind,
         weight: req.weight,
     }))
+}
+
+async fn rehearse_memory(
+    State(state): State<ApiState>,
+    Json(req): Json<crate::dto::RehearseRequest>,
+) -> Result<Json<crate::dto::RehearseResponse>, ApiProblem> {
+    validate_non_empty("agent_id", &req.agent_id)?;
+    validate_non_empty("chunk_id", &req.chunk_id)?;
+    let event_id = req.event_id.unwrap_or_else(|| {
+        format!(
+            "rehearse-{}-{}-{}",
+            req.agent_id, req.chunk_id, req.occurred_at_ms
+        )
+    });
+    track_memory_result(
+        &state,
+        state
+            .repository
+            .append_practice_event(PracticeEventWrite {
+                event_id: event_id.clone(),
+                agent_id: AgentId::from(req.agent_id.clone()),
+                chunk_id: ChunkId::from(req.chunk_id.clone()),
+                occurred_at_ms: req.occurred_at_ms,
+                kind: "rehearse".to_string(),
+                weight: req.weight,
+            })
+            .await,
+    )?;
+    Ok(Json(crate::dto::PracticeResponse {
+        event_id,
+        agent_id: req.agent_id,
+        chunk_id: req.chunk_id,
+        kind: "rehearse".to_string(),
+        weight: req.weight,
+    }))
+}
+
+async fn consolidate_memory(
+    State(state): State<ApiState>,
+    Json(req): Json<crate::dto::ConsolidateRequest>,
+) -> Result<Json<crate::dto::ConsolidateResponse>, ApiProblem> {
+    validate_non_empty("agent_id", &req.agent_id)?;
+    validate_non_empty("summary_chunk_type", &req.summary_chunk_type)?;
+    let report = track_memory_result(
+        &state,
+        state
+            .repository
+            .consolidate(StoreConsolidateRequest {
+                agent_id: AgentId::from(req.agent_id),
+                chunk_type: req.chunk_type.map(ChunkType::from),
+                summary_chunk_type: ChunkType::from(req.summary_chunk_type),
+                group_slot_keys: req.group_slot_keys,
+                min_group_size: req.min_group_size,
+                now_ms: req.now_ms,
+            })
+            .await,
+    )?;
+    Ok(Json(report.into()))
+}
+
+async fn forget_memory(
+    State(state): State<ApiState>,
+    Json(req): Json<crate::dto::ForgetRequest>,
+) -> Result<Json<crate::dto::ForgetResponse>, ApiProblem> {
+    validate_non_empty("agent_id", &req.agent_id)?;
+    let report = track_memory_result(
+        &state,
+        state
+            .repository
+            .forget(StoreForgetRequest {
+                agent_id: AgentId::from(req.agent_id),
+                chunk_type: req.chunk_type.map(ChunkType::from),
+                now_ms: req.now_ms,
+                recency_cutoff_ms: req.recency_cutoff_ms,
+                base_level_cutoff: req.base_level_cutoff,
+                allow_linked_forget: req.allow_linked_forget,
+            })
+            .await,
+    )?;
+    Ok(Json(report.into()))
 }
 
 async fn upsert_association(
@@ -348,15 +473,18 @@ async fn upsert_association(
     validate_non_empty("source", &req.source)?;
     track_memory_result(
         &state,
-        state.repository.upsert_association(AssociationWrite {
-            agent_id: AgentId::from(req.agent_id.clone()),
-            src_chunk_id: ChunkId::from(req.src_chunk_id.clone()),
-            dst_chunk_id: ChunkId::from(req.dst_chunk_id.clone()),
-            source: req.source.clone(),
-            strength: req.strength,
-            fan: req.fan,
-            updated_at_ms: req.updated_at_ms,
-        }),
+        state
+            .repository
+            .upsert_association(AssociationWrite {
+                agent_id: AgentId::from(req.agent_id.clone()),
+                src_chunk_id: ChunkId::from(req.src_chunk_id.clone()),
+                dst_chunk_id: ChunkId::from(req.dst_chunk_id.clone()),
+                source: req.source.clone(),
+                strength: req.strength,
+                fan: req.fan,
+                updated_at_ms: req.updated_at_ms,
+            })
+            .await,
     )?;
     Ok(Json(AssociateResponse {
         agent_id: req.agent_id,
@@ -379,16 +507,20 @@ async fn set_buffer(
     let chunk_id = ChunkId::from(req.chunk_id.clone());
     let chunk = state
         .repository
-        .get_chunk(&agent_id, &chunk_id)?
+        .get_chunk(&agent_id, &chunk_id)
+        .await?
         .ok_or_else(|| MemoryError::NotFound(format!("chunk {}", req.chunk_id)))?;
     track_memory_result(
         &state,
-        state.repository.set_buffer_current(BufferSetCurrent {
-            agent_id: agent_id.clone(),
-            buffer_name: buffer_name.clone(),
-            chunk_id: chunk_id.clone(),
-            set_at_ms: req.set_at_ms,
-        }),
+        state
+            .repository
+            .set_buffer_current(BufferSetCurrent {
+                agent_id: agent_id.clone(),
+                buffer_name: buffer_name.clone(),
+                chunk_id: chunk_id.clone(),
+                set_at_ms: req.set_at_ms,
+            })
+            .await,
     )?;
     let snapshot = state.sessions.with_session(agent_id, |session| {
         Ok(session.set_buffer(
@@ -417,7 +549,8 @@ async fn evaluate_rules(
         for rule_id in &req.candidate_rule_ids {
             if let Some(record) = state
                 .repository
-                .get_production_rule(&agent_id, &RuleId::from(rule_id.clone()))?
+                .get_production_rule(&agent_id, &RuleId::from(rule_id.clone()))
+                .await?
             {
                 rules.push(record.rule);
             }
@@ -430,18 +563,27 @@ async fn evaluate_rules(
         });
     }
 
-    let retrieved_chunk = req
-        .retrieved_chunk_id
-        .map(|chunk_id| {
+    let retrieved_chunk = if let Some(chunk_id) = req.retrieved_chunk_id {
+        Some(
             state
                 .repository
-                .get_chunk(&agent_id, &ChunkId::from(chunk_id.clone()))?
-                .ok_or_else(|| MemoryError::NotFound(format!("chunk {chunk_id}")))
-        })
-        .transpose()?;
+                .get_chunk(&agent_id, &ChunkId::from(chunk_id.clone()))
+                .await?
+                .ok_or_else(|| MemoryError::NotFound(format!("chunk {chunk_id}")))?,
+        )
+    } else {
+        None
+    };
     let buffers = state.session_snapshot(agent_id)?;
     let context = evaluation_context(&buffers, retrieved_chunk.as_ref());
-    let conflict = state.rule_engine(rules).conflict_resolution(context);
+    let policy = parse_rule_selection_policy(
+        &req.selection_policy,
+        req.utility_temperature,
+        req.deterministic_seed,
+    )?;
+    let conflict = state
+        .rule_engine(rules)
+        .conflict_resolution_with_policy(context, policy);
     Ok(Json(RuleEvaluateResponse::from_conflict(
         req.agent_id,
         conflict,
@@ -452,12 +594,26 @@ async fn healthz() -> Json<HealthResponse> {
     Json(health_response("pass", vec![HealthCheck::liveness()]))
 }
 
-async fn readyz() -> (StatusCode, Json<HealthResponse>) {
-    let response = health_response(
-        "warn",
-        vec![HealthCheck::liveness(), HealthCheck::memgraph_unchecked()],
-    );
-    (StatusCode::OK, Json(response))
+async fn readyz(State(state): State<ApiState>) -> (StatusCode, Json<HealthResponse>) {
+    match state.repository.health_check().await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(health_response(
+                "pass",
+                vec![HealthCheck::liveness(), HealthCheck::memgraph_ready()],
+            )),
+        ),
+        Err(error) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(health_response(
+                "fail",
+                vec![
+                    HealthCheck::liveness(),
+                    HealthCheck::memgraph_failed(error.to_string()),
+                ],
+            )),
+        ),
+    }
 }
 
 async fn metrics(State(state): State<ApiState>) -> impl IntoResponse {
@@ -478,6 +634,34 @@ fn health_response(status: &str, checks: Vec<HealthCheck>) -> HealthResponse {
                 detail: check.detail.to_string(),
             })
             .collect(),
+    }
+}
+
+fn parse_rule_selection_policy(
+    raw: &str,
+    utility_temperature: f64,
+    deterministic_seed: Option<u64>,
+) -> Result<RuleSelectionPolicy, ApiProblem> {
+    match raw {
+        "specificity" | "specificity_then_utility" => {
+            Ok(RuleSelectionPolicy::SpecificityThenUtility)
+        }
+        "utility_softmax" => {
+            if !utility_temperature.is_finite() || utility_temperature <= 0.0 {
+                return Err(MemoryError::Validation(
+                    "utility_temperature must be finite and positive".to_string(),
+                )
+                .into());
+            }
+            Ok(RuleSelectionPolicy::UtilitySoftmax {
+                temperature: utility_temperature,
+                seed: deterministic_seed.unwrap_or(0),
+            })
+        }
+        _ => Err(MemoryError::Validation(
+            "selection_policy must be specificity or utility_softmax".to_string(),
+        )
+        .into()),
     }
 }
 
@@ -510,10 +694,112 @@ mod tests {
         body::{Body, to_bytes},
         http::{Request, StatusCode, header::CONTENT_TYPE},
     };
+    use nestor_store::{
+        CandidateQuery, ChunkWithHistory, ConsolidationReport, ForgetReport, MemoryRepository,
+        ProductionRuleRecord, RetrievalPracticeWrite,
+    };
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
     use super::*;
+
+    #[derive(Debug, Default)]
+    struct FailingHealthRepository;
+
+    #[async_trait::async_trait]
+    impl MemoryRepository for FailingHealthRepository {
+        async fn health_check(&self) -> MemoryResult<()> {
+            Err(MemoryError::StoreUnavailable(
+                "repository probe failed".to_string(),
+            ))
+        }
+
+        async fn create_chunk(&self, _req: CreateChunk) -> MemoryResult<Chunk> {
+            unused_repository_call()
+        }
+
+        async fn upsert_chunk(&self, _req: CreateChunk) -> MemoryResult<Chunk> {
+            unused_repository_call()
+        }
+
+        async fn get_chunk(
+            &self,
+            _agent_id: &AgentId,
+            _chunk_id: &ChunkId,
+        ) -> MemoryResult<Option<Chunk>> {
+            unused_repository_call()
+        }
+
+        async fn update_chunk(&self, _req: UpdateChunk) -> MemoryResult<Chunk> {
+            unused_repository_call()
+        }
+
+        async fn soft_delete_chunk(
+            &self,
+            _agent_id: &AgentId,
+            _chunk_id: &ChunkId,
+        ) -> MemoryResult<()> {
+            unused_repository_call()
+        }
+
+        async fn append_practice_event(&self, _req: PracticeEventWrite) -> MemoryResult<()> {
+            unused_repository_call()
+        }
+
+        async fn record_successful_retrieval(
+            &self,
+            _req: RetrievalPracticeWrite,
+        ) -> MemoryResult<()> {
+            unused_repository_call()
+        }
+
+        async fn fetch_candidates(
+            &self,
+            _req: CandidateQuery,
+        ) -> MemoryResult<Vec<ChunkWithHistory>> {
+            unused_repository_call()
+        }
+
+        async fn upsert_association(&self, _req: AssociationWrite) -> MemoryResult<()> {
+            unused_repository_call()
+        }
+
+        async fn set_buffer_current(&self, _req: BufferSetCurrent) -> MemoryResult<()> {
+            unused_repository_call()
+        }
+
+        async fn upsert_production_rule(
+            &self,
+            _req: ProductionRuleRecord,
+        ) -> MemoryResult<ProductionRuleRecord> {
+            unused_repository_call()
+        }
+
+        async fn get_production_rule(
+            &self,
+            _agent_id: &AgentId,
+            _rule_id: &RuleId,
+        ) -> MemoryResult<Option<ProductionRuleRecord>> {
+            unused_repository_call()
+        }
+
+        async fn consolidate(
+            &self,
+            _req: StoreConsolidateRequest,
+        ) -> MemoryResult<ConsolidationReport> {
+            unused_repository_call()
+        }
+
+        async fn forget(&self, _req: StoreForgetRequest) -> MemoryResult<ForgetReport> {
+            unused_repository_call()
+        }
+    }
+
+    fn unused_repository_call<T>() -> MemoryResult<T> {
+        Err(MemoryError::StoreUnavailable(
+            "unused test repository method".to_string(),
+        ))
+    }
 
     async fn request_json(
         app: Router,
@@ -746,7 +1032,28 @@ mod tests {
         assert_eq!(health_status, StatusCode::OK);
         assert_eq!(health_body["status"], "pass");
         assert_eq!(ready_status, StatusCode::OK);
-        assert_eq!(ready_body["status"], "warn");
+        assert_eq!(ready_body["status"], "pass");
+        assert_eq!(ready_body["checks"][1]["name"], "memgraph");
+        assert_eq!(ready_body["checks"][1]["status"], "pass");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ready_fails_when_repository_health_probe_fails()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let app = app_with_state(ApiState::with_repository(FailingHealthRepository));
+
+        let (status, body) = get_json(app, "/readyz").await?;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["status"], "fail");
+        assert_eq!(body["checks"][1]["name"], "memgraph");
+        assert_eq!(body["checks"][1]["status"], "fail");
+        assert!(
+            body["checks"][1]["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("repository probe failed"))
+        );
         Ok(())
     }
 }

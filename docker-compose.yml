@@ -4,7 +4,9 @@ services:
       context: .
     environment:
       NESTOR_API_BIND_ADDR: 0.0.0.0:8080
+      NESTOR_REPOSITORY: memgraph
       NESTOR_MEMGRAPH_URI: bolt://memgraph:7687
+      NESTOR_MEMGRAPH_MAX_CONNECTIONS: 16
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

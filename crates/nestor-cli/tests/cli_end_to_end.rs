@@ -22,6 +22,10 @@ async fn cli_covers_all_api_routes_and_validates_retrieval_math() -> TestResult<
 
     run_ok(&api_url, &["ready"])?;
     covered.insert("GET /readyz");
+    let ready_body = run_json(&api_url, &["--format", "json", "ready"])?;
+    assert_eq!(ready_body["status"], "pass");
+    assert_eq!(ready_body["checks"][1]["name"], "memgraph");
+    assert_eq!(ready_body["checks"][1]["status"], "pass");
 
     run_ok(
         &api_url,
@@ -61,6 +65,84 @@ async fn cli_covers_all_api_routes_and_validates_retrieval_math() -> TestResult<
             "detail=symbol:strong-black-coffee",
             "--now-ms",
             "1000",
+        ],
+    )?;
+
+    run_ok(
+        &api_url,
+        &[
+            "--agent",
+            agent_id,
+            "chunk",
+            "put",
+            "episode-a",
+            "--type",
+            "episode",
+            "--slot",
+            "topic=symbol:preference",
+            "--slot",
+            "subject=symbol:eli",
+            "--slot",
+            "detail=symbol:coffee-a",
+            "--now-ms",
+            "1000",
+        ],
+    )?;
+
+    run_ok(
+        &api_url,
+        &[
+            "--agent",
+            agent_id,
+            "chunk",
+            "put",
+            "episode-b",
+            "--type",
+            "episode",
+            "--slot",
+            "topic=symbol:preference",
+            "--slot",
+            "subject=symbol:eli",
+            "--slot",
+            "detail=symbol:coffee-b",
+            "--now-ms",
+            "1100",
+        ],
+    )?;
+
+    run_ok(
+        &api_url,
+        &[
+            "--agent",
+            agent_id,
+            "chunk",
+            "put",
+            "forget-old",
+            "--type",
+            "stale",
+            "--slot",
+            "topic=symbol:old",
+            "--now-ms",
+            "100",
+        ],
+    )?;
+
+    run_ok(
+        &api_url,
+        &[
+            "--agent",
+            agent_id,
+            "chunk",
+            "put",
+            "forget-protected",
+            "--type",
+            "stale",
+            "--slot",
+            "topic=symbol:old",
+            "--slot",
+            "protected=bool:true",
+            "--now-ms",
+            "100",
         ],
     )?;
 
@@ -169,6 +251,23 @@ async fn cli_covers_all_api_routes_and_validates_retrieval_math() -> TestResult<
         &[
             "--agent",
             agent_id,
+            "rehearse",
+            "mem-project",
+            "--weight",
+            "1",
+            "--at-ms",
+            "1600",
+            "--event-id",
+            "rehearse-cli-e2e-project-1",
+        ],
+    )?;
+    covered.insert("POST /v1/memory/rehearse");
+
+    run_ok(
+        &api_url,
+        &[
+            "--agent",
+            agent_id,
             "associate",
             "ctx-goal",
             "mem-preference",
@@ -214,6 +313,8 @@ async fn cli_covers_all_api_routes_and_validates_retrieval_math() -> TestResult<
             "3",
             "--seed",
             "42",
+            "--commit",
+            "false",
             "--now-ms",
             "11000",
         ],
@@ -249,6 +350,45 @@ async fn cli_covers_all_api_routes_and_validates_retrieval_math() -> TestResult<
     assert_eq!(retrieve_body["status"], "hit");
     assert_eq!(retrieve_body["results"][0]["chunk_id"], "mem-preference");
     assert_retrieval_formula(&retrieve_body)?;
+
+    let retrieved_get_body = run_json(
+        &api_url,
+        &[
+            "--agent",
+            agent_id,
+            "--format",
+            "json",
+            "chunk",
+            "get",
+            "mem-preference",
+        ],
+    )?;
+    assert_eq!(retrieved_get_body["retrieval_count"], 1);
+
+    let consolidate_body = run_json(
+        &api_url,
+        &[
+            "--agent",
+            agent_id,
+            "--format",
+            "json",
+            "consolidate",
+            "--type",
+            "episode",
+            "--summary-type",
+            "semantic",
+            "--group-slot",
+            "topic",
+            "--group-slot",
+            "subject",
+            "--min-group-size",
+            "2",
+            "--now-ms",
+            "12000",
+        ],
+    )?;
+    covered.insert("POST /v1/memory/consolidate");
+    assert_eq!(consolidate_body["groups_consolidated"], 1);
 
     let rules_file = write_rules_file()?;
     let rule_body = run_json(
@@ -287,6 +427,33 @@ async fn cli_covers_all_api_routes_and_validates_retrieval_math() -> TestResult<
     )?;
     covered.insert("DELETE /v1/memory/chunks/{chunk_id}");
     assert_eq!(delete_body["deleted"], true);
+
+    let forget_body = run_json(
+        &api_url,
+        &[
+            "--agent",
+            agent_id,
+            "--format",
+            "json",
+            "forget",
+            "--type",
+            "stale",
+            "--now-ms",
+            "1000000",
+            "--recency-cutoff-ms",
+            "500",
+            "--base-level-cutoff",
+            "0",
+            "--allow-linked",
+            "false",
+        ],
+    )?;
+    covered.insert("POST /v1/memory/forget");
+    assert_eq!(forget_body["forgotten_chunk_ids"], json!(["forget-old"]));
+    assert_eq!(
+        forget_body["protected_chunk_ids"],
+        json!(["forget-protected"])
+    );
 
     let metrics = run_stdout(&api_url, &["metrics"])?;
     covered.insert("GET /metrics");

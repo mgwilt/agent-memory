@@ -21,9 +21,12 @@ Explore:
 pub const WORKFLOW: &str = "nestor --agent agent-1 chunk put ctx-goal --type goal --slot task=symbol:answer-memory-question
 nestor --agent agent-1 chunk put mem-preference --type fact --slot subject=symbol:eli --slot topic=symbol:preference --slot detail=text:\"strong black coffee\"
 nestor --agent agent-1 practice mem-preference --kind retrieve --weight 2
+nestor --agent agent-1 rehearse mem-preference --weight 1
 nestor --agent agent-1 associate ctx-goal mem-preference --source goal --strength 1.25
 nestor --agent agent-1 buffer set goal ctx-goal
 nestor --agent agent-1 retrieve --type fact --cue topic=symbol:preference --context ctx-goal --threshold -10 --result-limit 3
+nestor --agent agent-1 consolidate --type episode --group-slot topic
+nestor --agent agent-1 forget --type fact --recency-cutoff-ms 1000 --base-level-cutoff -4
 nestor --agent agent-1 rule eval --retrieved mem-preference --rules-file rules.json
 nestor metrics --grep retrieval_hits";
 

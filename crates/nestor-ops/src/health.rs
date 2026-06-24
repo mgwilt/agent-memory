@@ -9,7 +9,7 @@ pub enum HealthStatus {
 pub struct HealthCheck {
     pub name: &'static str,
     pub status: HealthStatus,
-    pub detail: &'static str,
+    pub detail: String,
 }
 
 impl HealthCheck {
@@ -17,15 +17,23 @@ impl HealthCheck {
         Self {
             name: "liveness",
             status: HealthStatus::Pass,
-            detail: "process is running",
+            detail: "process is running".to_string(),
         }
     }
 
-    pub fn memgraph_unchecked() -> Self {
+    pub fn memgraph_ready() -> Self {
         Self {
             name: "memgraph",
-            status: HealthStatus::Warn,
-            detail: "driver integration is introduced in G04",
+            status: HealthStatus::Pass,
+            detail: "Memgraph connection is ready".to_string(),
+        }
+    }
+
+    pub fn memgraph_failed(detail: impl Into<String>) -> Self {
+        Self {
+            name: "memgraph",
+            status: HealthStatus::Fail,
+            detail: detail.into(),
         }
     }
 }

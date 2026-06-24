@@ -1,4 +1,4 @@
-use nestor_core::Chunk;
+use nestor_core::{Chunk, deterministic_unit_interval, softmax_probabilities};
 use nestor_session::BufferSnapshot;
 
 use crate::rule::{ProductionRule, RuleId};
@@ -39,6 +39,16 @@ pub struct ConflictResolution {
     pub candidates: Vec<RuleCandidateDiagnostic>,
     pub matches: Vec<RuleMatch>,
     pub selected: Option<RuleMatch>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum RuleSelectionPolicy {
+    #[default]
+    SpecificityThenUtility,
+    UtilitySoftmax {
+        temperature: f64,
+        seed: u64,
+    },
 }
 
 impl ConflictResolution {
@@ -82,6 +92,14 @@ impl RuleEngine {
     }
 
     pub fn conflict_resolution(&self, context: RuleEvaluationContext<'_>) -> ConflictResolution {
+        self.conflict_resolution_with_policy(context, RuleSelectionPolicy::default())
+    }
+
+    pub fn conflict_resolution_with_policy(
+        &self,
+        context: RuleEvaluationContext<'_>,
+        policy: RuleSelectionPolicy,
+    ) -> ConflictResolution {
         let mut candidates = self
             .rules
             .iter()
@@ -112,9 +130,15 @@ impl RuleEngine {
                 .map(|rule_match| rule_match.rank);
         }
         candidates.sort_by(compare_candidate_diagnostics);
+        let selected = match policy {
+            RuleSelectionPolicy::SpecificityThenUtility => matches.first().cloned(),
+            RuleSelectionPolicy::UtilitySoftmax { temperature, seed } => {
+                choose_softmax_match(&matches, temperature, seed)
+            }
+        };
 
         ConflictResolution {
-            selected: matches.first().cloned(),
+            selected,
             candidates,
             matches,
         }
@@ -135,6 +159,23 @@ impl RuleEngine {
     pub fn choose_best(&self, buffers: &[BufferSnapshot]) -> Option<RuleMatch> {
         self.choose_best_in_context(RuleEvaluationContext::from_buffers(buffers))
     }
+}
+
+fn choose_softmax_match(matches: &[RuleMatch], temperature: f64, seed: u64) -> Option<RuleMatch> {
+    if matches.is_empty() {
+        return None;
+    }
+    let utilities = matches.iter().map(|rule| rule.utility).collect::<Vec<_>>();
+    let probabilities = softmax_probabilities(&utilities, temperature);
+    let sample = deterministic_unit_interval(seed, "rule-softmax");
+    let mut cumulative = 0.0;
+    for (rule_match, probability) in matches.iter().zip(probabilities) {
+        cumulative += probability;
+        if sample <= cumulative {
+            return Some(rule_match.clone());
+        }
+    }
+    matches.last().cloned()
 }
 
 fn evaluate_rule(
@@ -307,6 +348,54 @@ mod tests {
             .find(|rule_match| rule_match.rule_id == RuleId::from("tie-b"))
             .map(|rule_match| rule_match.rank);
         assert!(tie_a_rank < tie_b_rank);
+    }
+
+    #[test]
+    fn utility_softmax_policy_can_select_high_utility_over_specificity() {
+        let session = goal_session();
+        let engine = RuleEngine::new(vec![
+            ProductionRule::new(
+                RuleId::from("generic-high-utility"),
+                "generic",
+                vec![BufferCondition::buffer_present(BufferName::Goal)],
+            )
+            .with_utility(100.0),
+            ProductionRule::new(
+                RuleId::from("specific-low-utility"),
+                "specific",
+                vec![BufferCondition {
+                    buffer: BufferName::Goal,
+                    chunk_id: Some(ChunkId::from("goal-1")),
+                    chunk_type: Some(ChunkType::from("goal")),
+                }],
+            )
+            .with_utility(-100.0),
+        ]);
+
+        let default_conflict =
+            engine.conflict_resolution(RuleEvaluationContext::from_buffers(&session.snapshot()));
+        let softmax_conflict = engine.conflict_resolution_with_policy(
+            RuleEvaluationContext::from_buffers(&session.snapshot()),
+            RuleSelectionPolicy::UtilitySoftmax {
+                temperature: 1.0,
+                seed: 42,
+            },
+        );
+
+        assert_eq!(
+            default_conflict
+                .selected
+                .as_ref()
+                .map(|rule| rule.rule_id.clone()),
+            Some(RuleId::from("specific-low-utility"))
+        );
+        assert_eq!(
+            softmax_conflict
+                .selected
+                .as_ref()
+                .map(|rule| rule.rule_id.clone()),
+            Some(RuleId::from("generic-high-utility"))
+        );
     }
 
     #[test]

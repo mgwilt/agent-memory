@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use nestor_api::{
-    AssociateResponse, BufferResponse, ChunkResponse, DeleteResponse, HealthResponse,
-    PracticeResponse, RetrieveResponse, RuleEvaluateResponse,
+    AssociateResponse, BufferResponse, ChunkResponse, ConsolidateResponse, DeleteResponse,
+    ForgetResponse, HealthResponse, PracticeResponse, RetrieveResponse, RuleEvaluateResponse,
 };
 use serde_json::json;
 
@@ -93,6 +93,32 @@ pub fn render_practice(response: &PracticeResponse) -> String {
     format!(
         "practice recorded\nevent_id: {}\nagent: {}\nchunk: {}\nkind: {}\nweight: {}",
         response.event_id, response.agent_id, response.chunk_id, response.kind, response.weight
+    )
+}
+
+pub fn render_consolidate(response: &ConsolidateResponse) -> String {
+    let mut lines = vec![format!(
+        "consolidate: {} groups\nagent: {}\nconsidered: {}",
+        response.groups_consolidated, response.agent_id, response.groups_considered
+    )];
+    for summary in &response.summaries {
+        lines.push(format!(
+            "- {} from {}",
+            summary.summary_chunk_id,
+            summary.source_chunk_ids.join(", ")
+        ));
+    }
+    lines.join("\n")
+}
+
+pub fn render_forget(response: &ForgetResponse) -> String {
+    format!(
+        "forget: examined {}\nagent: {}\nforgotten: {}\narchived: {}\nprotected: {}",
+        response.examined,
+        response.agent_id,
+        render_list(&response.forgotten_chunk_ids),
+        render_list(&response.archived_chunk_ids),
+        render_list(&response.protected_chunk_ids)
     )
 }
 
@@ -273,5 +299,13 @@ fn render_slot_value(value: &nestor_api::SlotValueDto) -> String {
         nestor_api::SlotValueDto::Text(value) => format!("text:{value}"),
         nestor_api::SlotValueDto::Number(value) => format!("number:{value}"),
         nestor_api::SlotValueDto::Bool(value) => format!("bool:{value}"),
+    }
+}
+
+fn render_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "<none>".to_string()
+    } else {
+        values.join(", ")
     }
 }

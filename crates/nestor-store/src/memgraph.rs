@@ -9,8 +9,10 @@ use crate::migrations::{
 pub struct MemgraphRepositoryConfig {
     pub uri: String,
     pub user: String,
+    pub password: String,
     pub database: String,
     pub max_connections: usize,
+    pub tls_ca_file: Option<String>,
     pub schema_info_enabled: bool,
 }
 
@@ -19,8 +21,10 @@ impl Default for MemgraphRepositoryConfig {
         Self {
             uri: "bolt://127.0.0.1:7687".to_string(),
             user: "memgraph".to_string(),
+            password: String::new(),
             database: "memgraph".to_string(),
             max_connections: 16,
+            tls_ca_file: None,
             schema_info_enabled: true,
         }
     }

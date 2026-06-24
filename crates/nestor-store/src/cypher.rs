@@ -38,7 +38,11 @@ FOREACH (slot IN $slots |
     value_hash: slot.value_hash
   })
   SET v.value_norm = slot.value_norm,
-      v.value_type = slot.value_type
+      v.value_type = slot.value_type,
+      v.value_symbol = slot.value_symbol,
+      v.value_text = slot.value_text,
+      v.value_number = slot.value_number,
+      v.value_bool = slot.value_bool
   MERGE (c)-[has_slot:HAS_SLOT {key: slot.key}]->(v)
   SET has_slot.value_type = slot.value_type
 )
@@ -78,7 +82,11 @@ RETURN c.agent_id AS agent_id,
          key: slot_edge.key,
          value_type: slot_edge.value_type,
          value_norm: slot_value.value_norm,
-         value_hash: slot_value.value_hash
+         value_hash: slot_value.value_hash,
+         value_symbol: slot_value.value_symbol,
+         value_text: slot_value.value_text,
+         value_number: slot_value.value_number,
+         value_bool: slot_value.value_bool
        }) AS slots
 "#;
 
@@ -101,7 +109,11 @@ FOREACH (slot IN $slots |
     value_hash: slot.value_hash
   })
   SET v.value_norm = slot.value_norm,
-      v.value_type = slot.value_type
+      v.value_type = slot.value_type,
+      v.value_symbol = slot.value_symbol,
+      v.value_text = slot.value_text,
+      v.value_number = slot.value_number,
+      v.value_bool = slot.value_bool
   MERGE (c)-[has_slot:HAS_SLOT {key: slot.key}]->(v)
   SET has_slot.value_type = slot.value_type
 )
@@ -134,9 +146,32 @@ CREATE (e:PracticeEvent {
 CREATE (c)-[:HAS_EVENT]->(e)
 SET c.last_practiced_at = datetime($occurred_at),
     c.practice_count = coalesce(c.practice_count, 0) + 1,
+    c.base_level_cache_stale = true,
     c.updated_at_ms = $occurred_at_ms,
     c.updated_at = datetime($occurred_at)
 RETURN e.event_id AS event_id
+"#;
+
+pub const RECORD_SUCCESSFUL_RETRIEVAL: &str = r#"
+MATCH (c:Chunk {agent_id: $agent_id, chunk_id: $chunk_id, active: true})
+CREATE (e:PracticeEvent {
+  event_id: $event_id,
+  agent_id: $agent_id,
+  chunk_id: $chunk_id,
+  occurred_at_ms: $occurred_at_ms,
+  ts: datetime($occurred_at),
+  kind: "retrieve",
+  weight: $weight
+})
+CREATE (c)-[:HAS_EVENT]->(e)
+SET c.last_practiced_at = datetime($occurred_at),
+    c.practice_count = coalesce(c.practice_count, 0) + 1,
+    c.retrieval_count = coalesce(c.retrieval_count, 0) + 1,
+    c.base_level_cache_stale = true,
+    c.updated_at_ms = $occurred_at_ms,
+    c.updated_at = datetime($occurred_at)
+RETURN e.event_id AS event_id,
+       c.retrieval_count AS retrieval_count
 "#;
 
 pub const FETCH_CANDIDATES: &str = r#"
@@ -151,7 +186,7 @@ WITH c, count(DISTINCT matched_slot.key) AS cue_matches
 WHERE size($cue_slots) = 0 OR cue_matches > 0
 OPTIONAL MATCH (ctx:Chunk {agent_id: $agent_id})-[assoc:ASSOCIATED]->(c)
 WHERE ctx.chunk_id IN $context_chunk_ids
-WITH c, cue_matches, coalesce(sum(assoc.strength), 0.0) AS spread_score
+WITH c, cue_matches, toFloat(coalesce(sum(assoc.strength), 0.0)) AS spread_score
 OPTIONAL MATCH (c)-[:HAS_EVENT]->(event:PracticeEvent)
 WITH c, cue_matches, spread_score, event
 ORDER BY event.occurred_at_ms DESC
@@ -174,7 +209,11 @@ WITH c,
        key: slot_edge.key,
        value_type: slot_edge.value_type,
        value_norm: slot_value.value_norm,
-       value_hash: slot_value.value_hash
+       value_hash: slot_value.value_hash,
+       value_symbol: slot_value.value_symbol,
+       value_text: slot_value.value_text,
+       value_number: slot_value.value_number,
+       value_bool: slot_value.value_bool
      }) AS slots
 RETURN c.agent_id AS agent_id,
        c.chunk_id AS chunk_id,
@@ -185,7 +224,8 @@ RETURN c.agent_id AS agent_id,
        coalesce(c.base_bias, 0.0) AS base_bias,
        slots AS slots,
        practice_events AS practice_events,
-       spread_score AS spread_score
+       spread_score AS spread_score,
+       coalesce(c.base_level_cache_stale, false) AS base_level_cache_stale
 ORDER BY cue_matches DESC,
          spread_score DESC,
          c.last_practiced_at DESC,
@@ -228,6 +268,8 @@ ON CREATE SET p.created_at_ms = $updated_at_ms,
 SET p.name = $name,
     p.enabled = $enabled,
     p.utility = $utility,
+    p.conditions_json = $conditions_json,
+    p.retrieved_chunk_json = $retrieved_chunk_json,
     p.success_count = $success_count,
     p.failure_count = $failure_count,
     p.avg_reward = $avg_reward,
@@ -248,7 +290,39 @@ RETURN p.agent_id AS agent_id,
        p.version AS version,
        coalesce(p.success_count, 0) AS success_count,
        coalesce(p.failure_count, 0) AS failure_count,
-       coalesce(p.avg_reward, 0.0) AS avg_reward
+       coalesce(p.avg_reward, 0.0) AS avg_reward,
+       coalesce(p.conditions_json, "[]") AS conditions_json,
+       p.retrieved_chunk_json AS retrieved_chunk_json
+"#;
+
+pub const SET_CHUNK_SLOT: &str = r#"
+MATCH (c:Chunk {agent_id: $agent_id, chunk_id: $chunk_id, active: true})
+MERGE (v:SlotValue {
+  tenant_id: $agent_id,
+  key: $key,
+  value_hash: $value_hash
+})
+SET v.value_norm = $value_norm,
+    v.value_type = $value_type,
+    v.value_symbol = $value_symbol,
+    v.value_text = $value_text,
+    v.value_number = $value_number,
+    v.value_bool = $value_bool
+MERGE (c)-[has_slot:HAS_SLOT {key: $key}]->(v)
+SET has_slot.value_type = $value_type,
+    c.updated_at_ms = $updated_at_ms,
+    c.updated_at = datetime($updated_at),
+    c.slot_hash = $slot_hash,
+    c.version = coalesce(c.version, 1) + 1
+RETURN c.chunk_id AS chunk_id
+"#;
+
+pub const ASSOCIATION_LINK_COUNT: &str = r#"
+MATCH (c:Chunk {agent_id: $agent_id, chunk_id: $chunk_id, active: true})
+OPTIONAL MATCH (c)-[out:ASSOCIATED]->(:Chunk {agent_id: $agent_id})
+WITH c, count(out) AS outgoing_count
+OPTIONAL MATCH (:Chunk {agent_id: $agent_id})-[incoming:ASSOCIATED]->(c)
+RETURN outgoing_count + count(incoming) AS link_count
 "#;
 
 pub const REPOSITORY_CYPHER: &[RepositoryCypher] = &[
@@ -283,6 +357,12 @@ pub const REPOSITORY_CYPHER: &[RepositoryCypher] = &[
         text: APPEND_PRACTICE_EVENT,
     },
     RepositoryCypher {
+        name: "record_successful_retrieval",
+        operation: CypherOperation::Write,
+        requires_transaction: true,
+        text: RECORD_SUCCESSFUL_RETRIEVAL,
+    },
+    RepositoryCypher {
         name: "fetch_candidates",
         operation: CypherOperation::Read,
         requires_transaction: false,
@@ -311,6 +391,18 @@ pub const REPOSITORY_CYPHER: &[RepositoryCypher] = &[
         operation: CypherOperation::Read,
         requires_transaction: false,
         text: GET_PRODUCTION_RULE,
+    },
+    RepositoryCypher {
+        name: "set_chunk_slot",
+        operation: CypherOperation::Write,
+        requires_transaction: true,
+        text: SET_CHUNK_SLOT,
+    },
+    RepositoryCypher {
+        name: "association_link_count",
+        operation: CypherOperation::Read,
+        requires_transaction: false,
+        text: ASSOCIATION_LINK_COUNT,
     },
 ];
 

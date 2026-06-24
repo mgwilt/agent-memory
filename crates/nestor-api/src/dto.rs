@@ -6,7 +6,10 @@ use nestor_rules::{
     RuleRejectionReason,
 };
 use nestor_session::{BufferName, BufferSnapshot};
-use nestor_store::{RetrievalMissReason, RetrievalOutcome, RetrievalStatus};
+use nestor_store::{
+    ConsolidationReport as StoreConsolidationReport, ForgetReport as StoreForgetReport,
+    RetrievalMissReason, RetrievalOutcome, RetrievalStatus,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -181,6 +184,119 @@ pub struct PracticeResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RehearseRequest {
+    pub agent_id: String,
+    pub chunk_id: String,
+    #[serde(default = "default_weight")]
+    pub weight: f64,
+    #[serde(default = "default_now_ms")]
+    pub occurred_at_ms: u64,
+    #[serde(default)]
+    pub event_id: Option<String>,
+}
+
+pub type RehearseResponse = PracticeResponse;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConsolidateRequest {
+    pub agent_id: String,
+    #[serde(default)]
+    pub chunk_type: Option<String>,
+    #[serde(default = "default_summary_chunk_type")]
+    pub summary_chunk_type: String,
+    #[serde(default)]
+    pub group_slot_keys: Vec<String>,
+    #[serde(default = "default_min_group_size")]
+    pub min_group_size: usize,
+    #[serde(default = "default_now_ms")]
+    pub now_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsolidationGroupResponse {
+    pub summary_chunk_id: String,
+    pub source_chunk_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsolidateResponse {
+    pub agent_id: String,
+    pub groups_considered: usize,
+    pub groups_consolidated: usize,
+    pub summaries: Vec<ConsolidationGroupResponse>,
+}
+
+impl From<StoreConsolidationReport> for ConsolidateResponse {
+    fn from(report: StoreConsolidationReport) -> Self {
+        Self {
+            agent_id: report.agent_id.0,
+            groups_considered: report.groups_considered,
+            groups_consolidated: report.groups_consolidated,
+            summaries: report
+                .summaries
+                .into_iter()
+                .map(|summary| ConsolidationGroupResponse {
+                    summary_chunk_id: summary.summary_chunk_id.0,
+                    source_chunk_ids: summary
+                        .source_chunk_ids
+                        .into_iter()
+                        .map(|chunk_id| chunk_id.0)
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ForgetRequest {
+    pub agent_id: String,
+    #[serde(default)]
+    pub chunk_type: Option<String>,
+    #[serde(default = "default_now_ms")]
+    pub now_ms: u64,
+    #[serde(default)]
+    pub recency_cutoff_ms: u64,
+    #[serde(default = "default_forget_base_level_cutoff")]
+    pub base_level_cutoff: f64,
+    #[serde(default)]
+    pub allow_linked_forget: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForgetResponse {
+    pub agent_id: String,
+    pub examined: usize,
+    pub forgotten_chunk_ids: Vec<String>,
+    pub archived_chunk_ids: Vec<String>,
+    pub protected_chunk_ids: Vec<String>,
+}
+
+impl From<StoreForgetReport> for ForgetResponse {
+    fn from(report: StoreForgetReport) -> Self {
+        Self {
+            agent_id: report.agent_id.0,
+            examined: report.examined,
+            forgotten_chunk_ids: report
+                .forgotten_chunk_ids
+                .into_iter()
+                .map(|chunk_id| chunk_id.0)
+                .collect(),
+            archived_chunk_ids: report
+                .archived_chunk_ids
+                .into_iter()
+                .map(|chunk_id| chunk_id.0)
+                .collect(),
+            protected_chunk_ids: report
+                .protected_chunk_ids
+                .into_iter()
+                .map(|chunk_id| chunk_id.0)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssociateRequest {
     pub agent_id: String,
     pub src_chunk_id: String,
@@ -240,6 +356,12 @@ pub struct RuleEvaluateRequest {
     pub rules: Vec<ProductionRuleDto>,
     #[serde(default)]
     pub retrieved_chunk_id: Option<String>,
+    #[serde(default = "default_rule_selection_policy")]
+    pub selection_policy: String,
+    #[serde(default = "default_utility_temperature")]
+    pub utility_temperature: f64,
+    #[serde(default)]
+    pub deterministic_seed: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -455,6 +577,15 @@ pub struct RetrievalResult {
     pub predicted_latency_ms: f64,
     pub passes_threshold: bool,
     pub components: ScoreComponents,
+    pub practice_input: RetrievalPracticeInputDiagnostics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetrievalPracticeInputDiagnostics {
+    pub total_practice_event_count: usize,
+    pub exact_practice_event_count: usize,
+    pub compressed_practice_bin_count: usize,
+    pub base_level_cache_stale: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -509,6 +640,18 @@ impl RetrieveResponse {
                         spreading: candidate.score.spreading,
                         partial_match: candidate.score.partial_match,
                         noise: candidate.score.noise,
+                    },
+                    practice_input: RetrievalPracticeInputDiagnostics {
+                        total_practice_event_count: candidate
+                            .practice_input
+                            .total_practice_event_count,
+                        exact_practice_event_count: candidate
+                            .practice_input
+                            .exact_practice_event_count,
+                        compressed_practice_bin_count: candidate
+                            .practice_input
+                            .compressed_practice_bin_count,
+                        base_level_cache_stale: candidate.practice_input.base_level_cache_stale,
                     },
                 })
                 .collect(),
@@ -601,8 +744,28 @@ fn default_fan() -> u64 {
     1
 }
 
+fn default_summary_chunk_type() -> String {
+    "semantic".to_string()
+}
+
+fn default_min_group_size() -> usize {
+    2
+}
+
+fn default_forget_base_level_cutoff() -> f64 {
+    -4.0
+}
+
 fn default_version() -> u64 {
     1
+}
+
+fn default_rule_selection_policy() -> String {
+    "specificity".to_string()
+}
+
+fn default_utility_temperature() -> f64 {
+    1.0
 }
 
 fn default_now_ms() -> u64 {

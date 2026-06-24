@@ -1,8 +1,9 @@
 use nestor_api::{
     AssociateRequest, AssociateResponse, BufferResponse, BufferSetRequest, ChunkPatchRequest,
-    ChunkResponse, ChunkUpsertRequest, DeleteResponse, HealthResponse, PracticeRequest,
-    PracticeResponse, RetrieveRequest, RetrieveResponse, RouteSpec, RuleEvaluateRequest,
-    RuleEvaluateResponse, route_manifest,
+    ChunkResponse, ChunkUpsertRequest, ConsolidateRequest, ConsolidateResponse, DeleteResponse,
+    ForgetRequest, ForgetResponse, HealthResponse, PracticeRequest, PracticeResponse,
+    RehearseRequest, RehearseResponse, RetrieveRequest, RetrieveResponse, RouteSpec,
+    RuleEvaluateRequest, RuleEvaluateResponse, route_manifest,
 };
 
 use crate::{ApiClientConfig, ClientError, http::HttpTransport};
@@ -113,6 +114,27 @@ impl NestorClient {
         request: &PracticeRequest,
     ) -> Result<PracticeResponse, ClientError> {
         self.http.post_json("/v1/memory/practice", request).await
+    }
+
+    pub async fn rehearse_memory(
+        &self,
+        request: &RehearseRequest,
+    ) -> Result<RehearseResponse, ClientError> {
+        self.http.post_json("/v1/memory/rehearse", request).await
+    }
+
+    pub async fn consolidate_memory(
+        &self,
+        request: &ConsolidateRequest,
+    ) -> Result<ConsolidateResponse, ClientError> {
+        self.http.post_json("/v1/memory/consolidate", request).await
+    }
+
+    pub async fn forget_memory(
+        &self,
+        request: &ForgetRequest,
+    ) -> Result<ForgetResponse, ClientError> {
+        self.http.post_json("/v1/memory/forget", request).await
     }
 
     pub async fn upsert_association(

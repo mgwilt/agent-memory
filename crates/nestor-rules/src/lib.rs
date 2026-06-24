@@ -6,7 +6,7 @@ pub mod utility;
 
 pub use engine::{
     ConflictResolution, RuleCandidateDiagnostic, RuleEngine, RuleEvaluationContext, RuleMatch,
-    RuleRejectionReason,
+    RuleRejectionReason, RuleSelectionPolicy,
 };
 pub use rule::{
     BufferCondition, ProductionRule, ProductionRuleMetadata, RetrievedChunkCondition, RuleId,

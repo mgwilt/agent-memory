@@ -22,9 +22,11 @@ Memgraph owns:
 
 ## Runtime Profiles
 
-The Rust service loads `RuntimeConfig` from environment variables and validates
-it before binding the API listener. `NESTOR_PROFILE` accepts `development`,
-`staging`, or `production`:
+The Rust service loads `RuntimeConfig` from environment variables, constructs a
+repository, and validates the config before binding the API listener.
+`NESTOR_REPOSITORY` defaults to `memgraph`; `memory` is reserved for explicit
+test or local fixture runs. `NESTOR_PROFILE` accepts `development`, `staging`, or
+`production`:
 
 - `development` binds the API to `127.0.0.1:8080`, uses local Bolt at
   `bolt://127.0.0.1:7687`, and leaves Memgraph credentials optional for local
@@ -36,10 +38,15 @@ it before binding the API listener. `NESTOR_PROFILE` accepts `development`,
   credential source.
 
 Common overrides are `NESTOR_API_BIND_ADDR`, `NESTOR_MEMGRAPH_URI`,
-`NESTOR_MEMGRAPH_USER`, `NESTOR_CANDIDATE_LIMIT`, `NESTOR_RETRIEVAL_THRESHOLD`, and
+`NESTOR_MEMGRAPH_USER`, `NESTOR_MEMGRAPH_MAX_CONNECTIONS`,
+`NESTOR_CANDIDATE_LIMIT`, `NESTOR_RETRIEVAL_THRESHOLD`, and
 `NESTOR_DETERMINISTIC_SEED`. TLS is controlled with
 `NESTOR_MEMGRAPH_TLS_ENABLED`, `NESTOR_MEMGRAPH_TLS_CA_FILE`, and
 `NESTOR_MEMGRAPH_TLS_SERVER_NAME`.
+
+`/readyz` runs a real repository health check. With the Memgraph backend, this is
+a Bolt query against Memgraph; with the explicit in-memory backend it reports the
+test repository as ready.
 
 ## Observability
 

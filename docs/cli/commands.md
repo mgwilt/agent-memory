@@ -172,6 +172,58 @@ nestor --agent agent-1 practice mem-preference --kind retrieve --weight 2
 
 Related: [Workflows](./workflows.md).
 
+## Rehearse
+
+Endpoint: `POST /v1/memory/rehearse`.
+
+Required: `--agent`, `<CHUNK_ID>`.
+
+Options: `--weight`, `--at-ms`, `--event-id`, `--json-file`.
+
+Example:
+
+```sh
+nestor --agent agent-1 rehearse mem-preference --weight 1
+```
+
+Related: [Workflows](./workflows.md).
+
+## Consolidate
+
+Endpoint: `POST /v1/memory/consolidate`.
+
+Required: `--agent`.
+
+Options: `--type`, `--summary-type`, `--group-slot`, `--min-group-size`,
+`--now-ms`, `--json-file`.
+
+Example:
+
+```sh
+nestor --agent agent-1 consolidate --type episode --group-slot topic
+```
+
+Related: [Workflows](./workflows.md).
+
+## Forget
+
+Endpoint: `POST /v1/memory/forget`.
+
+Required: `--agent`.
+
+Options: `--type`, `--now-ms`, `--recency-cutoff-ms`,
+`--base-level-cutoff`, `--allow-linked`, `--json-file`.
+
+Example:
+
+```sh
+nestor --agent agent-1 forget --type fact \
+  --recency-cutoff-ms 1000 \
+  --base-level-cutoff -4
+```
+
+Related: [Output And Errors](./output-and-errors.md).
+
 ## Associate
 
 Endpoint: `POST /v1/memory/associate`.

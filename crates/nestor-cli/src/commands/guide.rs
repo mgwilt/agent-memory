@@ -36,6 +36,9 @@ fn commands() -> &'static str {
   chunk      Create, inspect, patch, delete chunks
   retrieve   Retrieve memory with activation diagnostics
   practice   Record practice events
+  rehearse   Record rehearsal events
+  consolidate Create semantic summaries
+  forget     Apply forgetting policy
   associate  Upsert spreading-activation associations
   buffer     Set Nestor buffers
   rule       Evaluate production rules

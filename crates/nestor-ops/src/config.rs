@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fs};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeProfile {
@@ -6,6 +6,30 @@ pub enum RuntimeProfile {
     Development,
     Staging,
     Production,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum RepositoryBackend {
+    #[default]
+    Memgraph,
+    InMemory,
+}
+
+impl RepositoryBackend {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "memgraph" => Ok(Self::Memgraph),
+            "memory" | "in-memory" | "in_memory" => Ok(Self::InMemory),
+            _ => Err("NESTOR_REPOSITORY must be memgraph or memory".to_string()),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Memgraph => "memgraph",
+            Self::InMemory => "memory",
+        }
+    }
 }
 
 impl RuntimeProfile {
@@ -114,9 +138,11 @@ impl MemgraphSecurityConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeConfig {
     pub profile: RuntimeProfile,
+    pub repository_backend: RepositoryBackend,
     pub bind_addr: String,
     pub memgraph_uri: String,
     pub memgraph_user: String,
+    pub memgraph_max_connections: usize,
     pub memgraph_security: MemgraphSecurityConfig,
     pub candidate_limit: usize,
     pub retrieval_threshold: f64,
@@ -157,9 +183,11 @@ impl RuntimeConfig {
 
         Self {
             profile,
+            repository_backend: RepositoryBackend::Memgraph,
             bind_addr,
             memgraph_uri,
             memgraph_user: "memgraph".to_string(),
+            memgraph_max_connections: 16,
             memgraph_security,
             candidate_limit: 200,
             retrieval_threshold: 0.25,
@@ -180,6 +208,9 @@ impl RuntimeConfig {
             .unwrap_or_default();
         let mut config = Self::for_profile(profile);
 
+        if let Some(repository) = vars.get("NESTOR_REPOSITORY") {
+            config.repository_backend = RepositoryBackend::parse(repository)?;
+        }
         if let Some(bind_addr) = vars.get("NESTOR_API_BIND_ADDR") {
             config.bind_addr = bind_addr.clone();
         }
@@ -188,6 +219,11 @@ impl RuntimeConfig {
         }
         if let Some(memgraph_user) = vars.get("NESTOR_MEMGRAPH_USER") {
             config.memgraph_user = memgraph_user.clone();
+        }
+        if let Some(max_connections) = vars.get("NESTOR_MEMGRAPH_MAX_CONNECTIONS") {
+            config.memgraph_max_connections = max_connections.parse().map_err(|_| {
+                "NESTOR_MEMGRAPH_MAX_CONNECTIONS must be a positive integer".to_string()
+            })?;
         }
         if let Some(candidate_limit) = vars.get("NESTOR_CANDIDATE_LIMIT") {
             config.candidate_limit = candidate_limit
@@ -259,6 +295,9 @@ impl RuntimeConfig {
         if self.memgraph_user.trim().is_empty() {
             return Err("memgraph_user must not be empty".to_string());
         }
+        if self.memgraph_max_connections == 0 {
+            return Err("memgraph_max_connections must be greater than zero".to_string());
+        }
         if self.memgraph_uri.starts_with("bolt+s://") && !self.memgraph_security.tls_enabled {
             return Err("secure Memgraph URI requires TLS to be enabled".to_string());
         }
@@ -279,6 +318,17 @@ impl RuntimeConfig {
         }
         self.memgraph_security.validate()?;
         Ok(())
+    }
+
+    pub fn resolve_memgraph_password(&self) -> Result<String, String> {
+        match &self.memgraph_security.credentials {
+            Some(SecretSource::EnvVar(name)) => std::env::var(name)
+                .map_err(|_| format!("Memgraph password env var {name} is not set")),
+            Some(SecretSource::File(path)) => fs::read_to_string(path)
+                .map(|value| value.trim_end_matches(['\r', '\n']).to_string())
+                .map_err(|error| format!("failed to read Memgraph password file {path}: {error}")),
+            None => Ok(String::new()),
+        }
     }
 }
 
@@ -305,7 +355,43 @@ mod tests {
 
     #[test]
     fn default_config_is_valid() {
-        assert!(RuntimeConfig::default().validate().is_ok());
+        let config = RuntimeConfig::default();
+
+        assert!(config.validate().is_ok());
+        assert_eq!(config.repository_backend, RepositoryBackend::Memgraph);
+    }
+
+    #[test]
+    fn repository_backend_parses_default_and_explicit_memory_opt_in() {
+        assert_eq!(
+            RepositoryBackend::parse("memgraph"),
+            Ok(RepositoryBackend::Memgraph)
+        );
+        assert_eq!(
+            RepositoryBackend::parse("memory"),
+            Ok(RepositoryBackend::InMemory)
+        );
+        assert_eq!(
+            RepositoryBackend::parse("in-memory"),
+            Ok(RepositoryBackend::InMemory)
+        );
+        assert_eq!(RepositoryBackend::Memgraph.as_str(), "memgraph");
+        assert_eq!(RepositoryBackend::InMemory.as_str(), "memory");
+
+        let config =
+            RuntimeConfig::from_env_vars([("NESTOR_REPOSITORY".to_string(), "memory".to_string())])
+                .expect("memory backend should parse");
+
+        assert_eq!(config.repository_backend, RepositoryBackend::InMemory);
+    }
+
+    #[test]
+    fn invalid_repository_backend_is_rejected() {
+        let error =
+            RuntimeConfig::from_env_vars([("NESTOR_REPOSITORY".to_string(), "sqlite".to_string())])
+                .expect_err("unknown backend should fail");
+
+        assert!(error.contains("NESTOR_REPOSITORY"));
     }
 
     #[test]
@@ -391,5 +477,31 @@ mod tests {
             RuntimeConfig::from_env_vars([("NESTOR_CANDIDATE_LIMIT".to_string(), "0".to_string())])
                 .expect_err("zero candidate limit should fail");
         assert!(bound_error.contains("candidate_limit"));
+
+        let pool_error = RuntimeConfig::from_env_vars([(
+            "NESTOR_MEMGRAPH_MAX_CONNECTIONS".to_string(),
+            "0".to_string(),
+        )])
+        .expect_err("zero Memgraph pool size should fail");
+        assert!(pool_error.contains("memgraph_max_connections"));
+    }
+
+    #[test]
+    fn resolve_memgraph_password_from_file_trims_line_endings()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let path = std::env::temp_dir().join(format!(
+            "nestor-memgraph-password-{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&path, "secret\r\n")?;
+
+        let config = RuntimeConfig::from_env_vars([(
+            "NESTOR_MEMGRAPH_PASSWORD_FILE".to_string(),
+            path.to_string_lossy().to_string(),
+        )])?;
+
+        assert_eq!(config.resolve_memgraph_password()?, "secret");
+        std::fs::remove_file(path)?;
+        Ok(())
     }
 }

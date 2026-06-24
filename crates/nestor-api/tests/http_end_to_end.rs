@@ -25,7 +25,9 @@ async fn all_http_endpoints_and_activation_formulas_work() -> TestResult<()> {
     let (ready_status, ready_body) = get_json(app.clone(), "/readyz").await?;
     covered.insert("GET /readyz");
     assert_eq!(ready_status, StatusCode::OK);
-    assert_eq!(ready_body["status"], "warn");
+    assert_eq!(ready_body["status"], "pass");
+    assert_eq!(ready_body["checks"][1]["name"], "memgraph");
+    assert_eq!(ready_body["checks"][1]["status"], "pass");
 
     create_chunk(
         app.clone(),
@@ -81,6 +83,59 @@ async fn all_http_endpoints_and_activation_formulas_work() -> TestResult<()> {
     )
     .await?;
 
+    create_chunk(
+        app.clone(),
+        agent_id,
+        "episode-a",
+        "episode",
+        1_000,
+        json!({
+            "topic": symbol("preference"),
+            "subject": symbol("eli"),
+            "detail": symbol("coffee-a")
+        }),
+    )
+    .await?;
+
+    create_chunk(
+        app.clone(),
+        agent_id,
+        "episode-b",
+        "episode",
+        1_100,
+        json!({
+            "topic": symbol("preference"),
+            "subject": symbol("eli"),
+            "detail": symbol("coffee-b")
+        }),
+    )
+    .await?;
+
+    create_chunk(
+        app.clone(),
+        agent_id,
+        "forget-old",
+        "stale",
+        100,
+        json!({
+            "topic": symbol("old")
+        }),
+    )
+    .await?;
+
+    create_chunk(
+        app.clone(),
+        agent_id,
+        "forget-protected",
+        "stale",
+        100,
+        json!({
+            "topic": symbol("old"),
+            "protected": { "type": "bool", "value": true }
+        }),
+    )
+    .await?;
+
     let (get_status, get_body) = get_json(
         app.clone(),
         &format!("/v1/memory/chunks/mem-preference?agent_id={agent_id}"),
@@ -130,6 +185,23 @@ async fn all_http_endpoints_and_activation_formulas_work() -> TestResult<()> {
     covered.insert("POST /v1/memory/practice");
     assert_eq!(practice_status, StatusCode::OK);
     assert_eq!(practice_body["weight"], 2.0);
+
+    let (rehearse_status, rehearse_body) = request_json(
+        app.clone(),
+        "POST",
+        "/v1/memory/rehearse",
+        json!({
+            "agent_id": agent_id,
+            "chunk_id": "mem-project",
+            "event_id": "rehearse-http-e2e-project-1",
+            "weight": 1.0,
+            "occurred_at_ms": 1_600
+        }),
+    )
+    .await?;
+    covered.insert("POST /v1/memory/rehearse");
+    assert_eq!(rehearse_status, StatusCode::OK);
+    assert_eq!(rehearse_body["kind"], "rehearse");
 
     let (associate_status, associate_body) = request_json(
         app.clone(),
@@ -184,11 +256,13 @@ async fn all_http_endpoints_and_activation_formulas_work() -> TestResult<()> {
         "now_ms": 11_000
     });
 
+    let mut stream_request = retrieval_request.clone();
+    stream_request["commit_on_hit"] = json!(false);
     let (stream_status, stream_body) = request_json(
         app.clone(),
         "POST",
         "/v1/memory/retrieve/stream",
-        retrieval_request.clone(),
+        stream_request,
     )
     .await?;
     covered.insert("POST /v1/memory/retrieve/stream");
@@ -207,7 +281,43 @@ async fn all_http_endpoints_and_activation_formulas_work() -> TestResult<()> {
     assert_eq!(retrieve_status, StatusCode::OK);
     assert_eq!(retrieve_body["status"], "hit");
     assert_eq!(retrieve_body["diagnostics"]["candidates_examined"], 1);
+    assert_eq!(
+        retrieve_body["results"][0]["practice_input"]["exact_practice_event_count"],
+        2
+    );
     assert_retrieval_formula(&retrieve_body)?;
+
+    let (retrieved_get_status, retrieved_get_body) = get_json(
+        app.clone(),
+        &format!("/v1/memory/chunks/mem-preference?agent_id={agent_id}"),
+    )
+    .await?;
+    assert_eq!(retrieved_get_status, StatusCode::OK);
+    assert_eq!(retrieved_get_body["retrieval_count"], 1);
+
+    let (consolidate_status, consolidate_body) = request_json(
+        app.clone(),
+        "POST",
+        "/v1/memory/consolidate",
+        json!({
+            "agent_id": agent_id,
+            "chunk_type": "episode",
+            "summary_chunk_type": "semantic",
+            "group_slot_keys": ["topic", "subject"],
+            "min_group_size": 2,
+            "now_ms": 12_000
+        }),
+    )
+    .await?;
+    covered.insert("POST /v1/memory/consolidate");
+    assert_eq!(consolidate_status, StatusCode::OK);
+    assert_eq!(consolidate_body["groups_consolidated"], 1);
+    assert_eq!(
+        consolidate_body["summaries"][0]["source_chunk_ids"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
 
     let (rule_status, rule_body) = request_json(
         app.clone(),
@@ -251,6 +361,28 @@ async fn all_http_endpoints_and_activation_formulas_work() -> TestResult<()> {
     covered.insert("DELETE /v1/memory/chunks/{chunk_id}");
     assert_eq!(delete_status, StatusCode::OK);
     assert_eq!(delete_body["deleted"], true);
+
+    let (forget_status, forget_body) = request_json(
+        app.clone(),
+        "POST",
+        "/v1/memory/forget",
+        json!({
+            "agent_id": agent_id,
+            "chunk_type": "stale",
+            "now_ms": 1_000_000,
+            "recency_cutoff_ms": 500,
+            "base_level_cutoff": 0.0,
+            "allow_linked_forget": false
+        }),
+    )
+    .await?;
+    covered.insert("POST /v1/memory/forget");
+    assert_eq!(forget_status, StatusCode::OK);
+    assert_eq!(forget_body["forgotten_chunk_ids"], json!(["forget-old"]));
+    assert_eq!(
+        forget_body["protected_chunk_ids"],
+        json!(["forget-protected"])
+    );
 
     let (metrics_status, metrics_content_type, metrics_body) =
         get_text(app.clone(), "/metrics").await?;

@@ -6,9 +6,10 @@ use nestor_core::{
 use nestor_rules::RuleId;
 use nestor_session::SessionState;
 use nestor_store::{
-    AssociationWrite, BufferSetCurrent, CandidateQuery, ChunkWithHistory, CreateChunk,
-    MemoryRepository, MismatchPolicy, PracticeEventWrite, ProductionRuleRecord, RetrievalRequest,
-    UpdateChunk, retrieve_chunk,
+    AssociationWrite, BufferSetCurrent, CandidateQuery, ChunkWithHistory, ConsolidateRequest,
+    ConsolidationReport, CreateChunk, ForgetReport, ForgetRequest, MemoryRepository,
+    MismatchPolicy, PracticeEventWrite, ProductionRuleRecord, RetrievalPracticeWrite,
+    RetrievalRequest, UpdateChunk, retrieve_chunk,
 };
 
 const NOW_MS: u64 = 120_000;
@@ -25,6 +26,7 @@ impl BenchRepository {
                 chunk: candidate_chunk(index),
                 practice_events: bounded_practice_history(index, 8),
                 spread_score: (index % 7) as f64 * 0.05,
+                base_level_cache_stale: false,
             })
             .collect();
 
@@ -32,28 +34,45 @@ impl BenchRepository {
     }
 }
 
+#[async_trait::async_trait]
 impl MemoryRepository for BenchRepository {
-    fn create_chunk(&self, _req: CreateChunk) -> MemoryResult<Chunk> {
+    async fn create_chunk(&self, _req: CreateChunk) -> MemoryResult<Chunk> {
         Err(unsupported_write("create_chunk"))
     }
 
-    fn get_chunk(&self, _agent_id: &AgentId, _chunk_id: &ChunkId) -> MemoryResult<Option<Chunk>> {
+    async fn upsert_chunk(&self, _req: CreateChunk) -> MemoryResult<Chunk> {
+        Err(unsupported_write("upsert_chunk"))
+    }
+
+    async fn get_chunk(
+        &self,
+        _agent_id: &AgentId,
+        _chunk_id: &ChunkId,
+    ) -> MemoryResult<Option<Chunk>> {
         Ok(None)
     }
 
-    fn update_chunk(&self, _req: UpdateChunk) -> MemoryResult<Chunk> {
+    async fn update_chunk(&self, _req: UpdateChunk) -> MemoryResult<Chunk> {
         Err(unsupported_write("update_chunk"))
     }
 
-    fn soft_delete_chunk(&self, _agent_id: &AgentId, _chunk_id: &ChunkId) -> MemoryResult<()> {
+    async fn soft_delete_chunk(
+        &self,
+        _agent_id: &AgentId,
+        _chunk_id: &ChunkId,
+    ) -> MemoryResult<()> {
         Err(unsupported_write("soft_delete_chunk"))
     }
 
-    fn append_practice_event(&self, _req: PracticeEventWrite) -> MemoryResult<()> {
+    async fn append_practice_event(&self, _req: PracticeEventWrite) -> MemoryResult<()> {
         Err(unsupported_write("append_practice_event"))
     }
 
-    fn fetch_candidates(&self, req: CandidateQuery) -> MemoryResult<Vec<ChunkWithHistory>> {
+    async fn record_successful_retrieval(&self, _req: RetrievalPracticeWrite) -> MemoryResult<()> {
+        Ok(())
+    }
+
+    async fn fetch_candidates(&self, req: CandidateQuery) -> MemoryResult<Vec<ChunkWithHistory>> {
         req.validate()?;
         Ok(self
             .candidates
@@ -69,27 +88,48 @@ impl MemoryRepository for BenchRepository {
             .collect())
     }
 
-    fn upsert_association(&self, _req: AssociationWrite) -> MemoryResult<()> {
+    async fn upsert_association(&self, _req: AssociationWrite) -> MemoryResult<()> {
         Err(unsupported_write("upsert_association"))
     }
 
-    fn set_buffer_current(&self, _req: BufferSetCurrent) -> MemoryResult<()> {
+    async fn set_buffer_current(&self, _req: BufferSetCurrent) -> MemoryResult<()> {
         Ok(())
     }
 
-    fn upsert_production_rule(
+    async fn upsert_production_rule(
         &self,
         _req: ProductionRuleRecord,
     ) -> MemoryResult<ProductionRuleRecord> {
         Err(unsupported_write("upsert_production_rule"))
     }
 
-    fn get_production_rule(
+    async fn get_production_rule(
         &self,
         _agent_id: &AgentId,
         _rule_id: &RuleId,
     ) -> MemoryResult<Option<ProductionRuleRecord>> {
         Ok(None)
+    }
+
+    async fn consolidate(&self, req: ConsolidateRequest) -> MemoryResult<ConsolidationReport> {
+        req.validate()?;
+        Ok(ConsolidationReport {
+            agent_id: req.agent_id,
+            groups_considered: 0,
+            groups_consolidated: 0,
+            summaries: Vec::new(),
+        })
+    }
+
+    async fn forget(&self, req: ForgetRequest) -> MemoryResult<ForgetReport> {
+        req.validate()?;
+        Ok(ForgetReport {
+            agent_id: req.agent_id,
+            examined: 0,
+            forgotten_chunk_ids: Vec::new(),
+            archived_chunk_ids: Vec::new(),
+            protected_chunk_ids: Vec::new(),
+        })
     }
 }
 
@@ -173,6 +213,7 @@ fn bench_activation(c: &mut Criterion) {
 fn bench_retrieval(c: &mut Criterion) {
     let mut group = c.benchmark_group("retrieval");
     group.sample_size(20);
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should start");
     for candidate_count in [50_usize, 100, 200] {
         let repository = BenchRepository::new(candidate_count);
         let request = retrieval_request(candidate_count);
@@ -183,7 +224,11 @@ fn bench_retrieval(c: &mut Criterion) {
                 b.iter_batched(
                     || SessionState::new(AgentId::from("agent-1")),
                     |mut session| {
-                        let outcome = retrieve_chunk(&repository, &mut session, request.clone());
+                        let outcome = runtime.block_on(retrieve_chunk(
+                            &repository,
+                            &mut session,
+                            request.clone(),
+                        ));
                         if let Err(error) = &outcome {
                             panic!("benchmark retrieval failed: {error}");
                         }

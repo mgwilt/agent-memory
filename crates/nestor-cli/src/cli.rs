@@ -85,6 +85,9 @@ pub fn build_cli() -> Command {
         .subcommand(chunk_command())
         .subcommand(retrieve_command())
         .subcommand(practice_command())
+        .subcommand(rehearse_command())
+        .subcommand(consolidate_command())
+        .subcommand(forget_command())
         .subcommand(associate_command())
         .subcommand(buffer_command())
         .subcommand(rule_command())
@@ -206,6 +209,67 @@ fn practice_command() -> Command {
         .after_help("Endpoint: POST /v1/memory/practice\n\nExamples:\n  nestor --agent agent-1 practice mem-preference --kind retrieve --weight 2\n\nDocs:\n  docs/cli/commands.md#practice")
 }
 
+fn rehearse_command() -> Command {
+    Command::new("rehearse")
+        .about("Record a rehearsal event")
+        .arg(Arg::new("chunk-id").required(true))
+        .arg(Arg::new("weight").long("weight").value_parser(value_parser!(f64)))
+        .arg(Arg::new("at-ms").long("at-ms").value_parser(value_parser!(u64)))
+        .arg(Arg::new("event-id").long("event-id").value_name("ID"))
+        .arg(json_file_arg())
+        .after_help("Endpoint: POST /v1/memory/rehearse\n\nExamples:\n  nestor --agent agent-1 rehearse mem-preference --weight 1\n\nDocs:\n  docs/cli/commands.md#rehearse")
+}
+
+fn consolidate_command() -> Command {
+    Command::new("consolidate")
+        .about("Create semantic summaries from overlapping chunks")
+        .arg(Arg::new("type").long("type").value_name("TYPE"))
+        .arg(
+            Arg::new("summary-type")
+                .long("summary-type")
+                .value_name("TYPE"),
+        )
+        .arg(
+            Arg::new("group-slot")
+                .long("group-slot")
+                .action(ArgAction::Append)
+                .value_name("KEY"),
+        )
+        .arg(
+            Arg::new("min-group-size")
+                .long("min-group-size")
+                .value_parser(value_parser!(usize)),
+        )
+        .arg(Arg::new("now-ms").long("now-ms").value_parser(value_parser!(u64)))
+        .arg(json_file_arg())
+        .after_help("Endpoint: POST /v1/memory/consolidate\n\nExamples:\n  nestor --agent agent-1 consolidate --type episode --group-slot topic\n\nDocs:\n  docs/cli/commands.md#consolidate")
+}
+
+fn forget_command() -> Command {
+    Command::new("forget")
+        .about("Apply soft-delete or archive forgetting policy")
+        .arg(Arg::new("type").long("type").value_name("TYPE"))
+        .arg(Arg::new("now-ms").long("now-ms").value_parser(value_parser!(u64)))
+        .arg(
+            Arg::new("recency-cutoff-ms")
+                .long("recency-cutoff-ms")
+                .value_parser(value_parser!(u64)),
+        )
+        .arg(
+            Arg::new("base-level-cutoff")
+                .long("base-level-cutoff")
+                .allow_hyphen_values(true)
+                .value_parser(value_parser!(f64)),
+        )
+        .arg(
+            Arg::new("allow-linked")
+                .long("allow-linked")
+                .value_parser(["true", "false"]),
+        )
+        .arg(json_file_arg())
+        .after_help("Endpoint: POST /v1/memory/forget\n\nExamples:\n  nestor --agent agent-1 forget --type fact --recency-cutoff-ms 1000 --base-level-cutoff -4\n\nDocs:\n  docs/cli/commands.md#forget")
+}
+
 fn associate_command() -> Command {
     Command::new("associate")
         .about("Upsert spreading-activation associations")
@@ -283,6 +347,9 @@ mod tests {
             "chunk",
             "retrieve",
             "practice",
+            "rehearse",
+            "consolidate",
+            "forget",
             "associate",
             "buffer",
             "rule",

@@ -10,17 +10,22 @@ docker compose up -d
 ./scripts/wait-for-memgraph.sh
 ./scripts/bootstrap-memgraph.sh
 ./scripts/demo-retrieval.sh
+./scripts/demo-lifecycle.sh
 ```
 
 The stack includes the Rust API image, one Memgraph node, and Prometheus. Ports
 are published on `127.0.0.1` only: API `8080`, Memgraph Bolt `7687`, Memgraph
 OpenMetrics `9091`, and Prometheus `9090`. Prometheus scrapes Memgraph through
 `memgraph:9091` and the API through `api:8080` on the private Compose network.
+The API `serve` command uses Memgraph by default through `NESTOR_REPOSITORY=memgraph`
+and `NESTOR_MEMGRAPH_URI=bolt://memgraph:7687`; use `NESTOR_REPOSITORY=memory`
+only for explicit local fixtures or tests.
 
 Run the retrieval demo against a non-default API URL when needed:
 
 ```sh
 NESTOR_API_URL=http://127.0.0.1:8090 ./scripts/demo-retrieval.sh
+NESTOR_API_URL=http://127.0.0.1:8090 NESTOR_DEMO_RESTART_API=0 ./scripts/demo-lifecycle.sh
 ```
 
 Stop the stack:
@@ -38,11 +43,31 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+Run the live Memgraph suite when Docker is available:
+
+```sh
+docker compose up -d memgraph
+./scripts/wait-for-memgraph.sh
+./scripts/bootstrap-memgraph.sh
+./scripts/bootstrap-memgraph.sh
+NESTOR_STORE_MEMGRAPH_TESTS=1 cargo test -p nestor-store --test memgraph_repository_live -- --nocapture
+NESTOR_STORE_MEMGRAPH_TESTS=1 cargo test -p nestor-store --test memgraph_live -- --nocapture
+NESTOR_STORE_MEMGRAPH_TESTS=1 cargo test -p nestor-api --test memgraph_runtime -- --nocapture
+```
+
 ## Runtime Configuration
 
 Use `NESTOR_PROFILE=development`, `NESTOR_PROFILE=staging`, or
 `NESTOR_PROFILE=production` to select validated defaults. Production rejects
 loopback Memgraph URIs and requires TLS plus a credential source.
+
+Repository selection defaults to Memgraph:
+
+```sh
+NESTOR_REPOSITORY=memgraph
+NESTOR_MEMGRAPH_URI=bolt://127.0.0.1:7687
+NESTOR_MEMGRAPH_MAX_CONNECTIONS=16
+```
 
 For staged or production deployments, provide Memgraph credentials through
 runtime secrets rather than checked-in files:
@@ -71,9 +96,9 @@ keys, or local `.env` files.
   service is healthy.
 - If the API container exits immediately, rebuild it and confirm it is running
   the default `serve` command with `docker compose ps api`.
-- If `scripts/demo-retrieval.sh` cannot reach the API, confirm port `8080` is
+- If `scripts/demo-retrieval.sh` or `scripts/demo-lifecycle.sh` cannot reach the API, confirm port `8080` is
   free, `docker compose ps api` shows a running container, and
-  `curl -fsS http://127.0.0.1:8080/healthz` returns JSON.
+  `curl -fsS http://127.0.0.1:8080/readyz` returns pass JSON.
 - If Memgraph metrics are missing, confirm Prometheus can reach `memgraph:9091`
   from the Compose network.
 - If service metrics are missing, confirm the API is serving `/metrics` and that
