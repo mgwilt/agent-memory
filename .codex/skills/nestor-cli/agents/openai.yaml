@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nestor CLI"
+  short_description: "Use Nestor memory from the CLI"
+  default_prompt: "Use $nestor-cli to store and retrieve memories with the Nestor CLI."
