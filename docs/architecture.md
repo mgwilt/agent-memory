@@ -22,7 +22,7 @@ Memgraph owns:
 ## Runtime Profiles
 
 The Rust service loads `RuntimeConfig` from environment variables and validates
-it before binding the API listener. `ACTR_PROFILE` accepts `development`,
+it before binding the API listener. `NESTOR_PROFILE` accepts `development`,
 `staging`, or `production`:
 
 - `development` binds the API to `127.0.0.1:8080`, uses local Bolt at
@@ -34,18 +34,18 @@ it before binding the API listener. `ACTR_PROFILE` accepts `development`,
   runtime seeding, rejects loopback Memgraph URIs, and requires TLS plus a
   credential source.
 
-Common overrides are `ACTR_API_BIND_ADDR`, `ACTR_MEMGRAPH_URI`,
-`ACTR_MEMGRAPH_USER`, `ACTR_CANDIDATE_LIMIT`, `ACTR_RETRIEVAL_THRESHOLD`, and
-`ACTR_DETERMINISTIC_SEED`. TLS is controlled with
-`ACTR_MEMGRAPH_TLS_ENABLED`, `ACTR_MEMGRAPH_TLS_CA_FILE`, and
-`ACTR_MEMGRAPH_TLS_SERVER_NAME`.
+Common overrides are `NESTOR_API_BIND_ADDR`, `NESTOR_MEMGRAPH_URI`,
+`NESTOR_MEMGRAPH_USER`, `NESTOR_CANDIDATE_LIMIT`, `NESTOR_RETRIEVAL_THRESHOLD`, and
+`NESTOR_DETERMINISTIC_SEED`. TLS is controlled with
+`NESTOR_MEMGRAPH_TLS_ENABLED`, `NESTOR_MEMGRAPH_TLS_CA_FILE`, and
+`NESTOR_MEMGRAPH_TLS_SERVER_NAME`.
 
 ## Observability
 
 The Rust API exposes Prometheus text exposition at `/metrics`. The service
 metrics include retrieval hits and misses, last retrieval latency, last
 candidate count, last activation-compute duration, session-lock contention, and
-write conflicts. Prometheus scrapes the API through the `actr-memory` job in
+write conflicts. Prometheus scrapes the API through the `nestor` job in
 `config/prometheus/prometheus.yml`.
 
 Memgraph is started with `--metrics-format=OpenMetrics` and
@@ -59,16 +59,16 @@ Do not commit Memgraph passwords, client certificates, private keys, generated
 CA material, or local `.env` files. Runtime credentials should be supplied by
 the deployment environment through one of these sources:
 
-- `ACTR_MEMGRAPH_PASSWORD`: a secret value provided by the process environment.
-- `ACTR_MEMGRAPH_PASSWORD_ENV`: the name of an environment variable that will
+- `NESTOR_MEMGRAPH_PASSWORD`: a secret value provided by the process environment.
+- `NESTOR_MEMGRAPH_PASSWORD_ENV`: the name of an environment variable that will
   contain the secret.
-- `ACTR_MEMGRAPH_PASSWORD_FILE`: a path mounted from a secret manager, such as
+- `NESTOR_MEMGRAPH_PASSWORD_FILE`: a path mounted from a secret manager, such as
   `/run/secrets/memgraph-password`.
 
 Production deployments should use a private `bolt+s://` Memgraph endpoint,
-enable `ACTR_MEMGRAPH_TLS_ENABLED=true`, set
-`ACTR_MEMGRAPH_TLS_SERVER_NAME` to the certificate identity, and mount any CA
-bundle through `ACTR_MEMGRAPH_TLS_CA_FILE`.
+enable `NESTOR_MEMGRAPH_TLS_ENABLED=true`, set
+`NESTOR_MEMGRAPH_TLS_SERVER_NAME` to the certificate identity, and mount any CA
+bundle through `NESTOR_MEMGRAPH_TLS_CA_FILE`.
 
 ## Retrieval Flow
 

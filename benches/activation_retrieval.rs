@@ -1,15 +1,15 @@
-use actr_core::{
+use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use nestor_core::{
     ActivationInput, ActivationParams, AgentId, Chunk, ChunkId, ChunkType, MemoryError,
     MemoryResult, PartialMatchingParams, PracticeEvent, Slot, SlotValue, score_activation,
 };
-use actr_rules::RuleId;
-use actr_session::SessionState;
-use actr_store::{
+use nestor_rules::RuleId;
+use nestor_session::SessionState;
+use nestor_store::{
     AssociationWrite, BufferSetCurrent, CandidateQuery, ChunkWithHistory, CreateChunk,
     MemoryRepository, MismatchPolicy, PracticeEventWrite, ProductionRuleRecord, RetrievalRequest,
     UpdateChunk, retrieve_chunk,
 };
-use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
 const NOW_MS: u64 = 120_000;
 

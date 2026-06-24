@@ -1,12 +1,12 @@
 use std::{cell::RefCell, cmp::Ordering, collections::BTreeMap};
 
-use actr_core::{
+use nestor_core::{
     ActivationParams, AgentId, Chunk, ChunkId, ChunkType, MemoryError, MemoryResult, PracticeEvent,
     Slot, SlotValue,
 };
-use actr_rules::RuleId;
-use actr_session::{BufferName, SessionState};
-use actr_store::{
+use nestor_rules::RuleId;
+use nestor_session::{BufferName, SessionState};
+use nestor_store::{
     AssociationWrite, BufferSetCurrent, CandidateQuery, ChunkWithHistory, CreateChunk,
     DEFAULT_CANDIDATE_LIMIT, MemoryRepository, MismatchPolicy, PracticeEventWrite,
     ProductionRuleRecord, RetrievalMissReason, RetrievalRequest, RetrievalStatus, UpdateChunk,
@@ -280,7 +280,7 @@ fn snapshot_retrieval_chunk(session: &SessionState) -> Option<ChunkId> {
 #[test]
 fn retrieval_pipeline_exact_match_commits_retrieval_buffer() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    let chunk = repo.create_fact("ck-actr", "act-r", 1_000)?;
+    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000)?;
     let mut session = SessionState::new(AgentId::from("agent-1"));
 
     let outcome = retrieve_chunk(&repo, &mut session, hit_request(2_000))?;
@@ -313,7 +313,7 @@ fn retrieval_pipeline_exact_match_commits_retrieval_buffer() -> MemoryResult<()>
 #[test]
 fn retrieval_pipeline_threshold_miss_is_explicit_and_does_not_commit() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    repo.create_fact("ck-actr", "act-r", 1_000)?;
+    repo.create_fact("ck-nestor", "act-r", 1_000)?;
     let mut session = SessionState::new(AgentId::from("agent-1"));
     let mut request = hit_request(2_000);
     request.activation_params.retrieval_threshold = 10.0;
@@ -401,7 +401,7 @@ fn retrieval_pipeline_context_sensitive_spread_reranks_candidates() -> MemoryRes
 #[test]
 fn retrieval_pipeline_returns_score_diagnostics_and_reproducible_noise() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    let chunk = repo.create_fact("ck-actr", "act-r", 1_000)?;
+    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000)?;
     let mut first_session = SessionState::new(AgentId::from("agent-1"));
     let mut second_session = SessionState::new(AgentId::from("agent-1"));
     let mut request = hit_request(5_000);
@@ -433,7 +433,7 @@ fn retrieval_pipeline_returns_score_diagnostics_and_reproducible_noise() -> Memo
 #[test]
 fn retrieval_pipeline_can_rank_without_committing_buffers() -> MemoryResult<()> {
     let repo = RecordingRepository::default();
-    let chunk = repo.create_fact("ck-actr", "act-r", 1_000)?;
+    let chunk = repo.create_fact("ck-nestor", "act-r", 1_000)?;
     let mut session = SessionState::new(AgentId::from("agent-1"));
     let mut request = hit_request(2_000);
     request.commit_on_hit = false;

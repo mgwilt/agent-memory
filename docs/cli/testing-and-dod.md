@@ -14,10 +14,10 @@
 Manual verification:
 
 ```sh
-cargo run -p actr-cli -- --help
-cargo run -p actr-cli -- guide commands
-cargo run -p actr-cli -- guide workflow
-cargo test -p actr-cli
+cargo run -p nestor-cli -- --help
+cargo run -p nestor-cli -- guide commands
+cargo run -p nestor-cli -- guide workflow
+cargo test -p nestor-cli
 ```
 
 Workspace verification:
@@ -32,11 +32,11 @@ cargo test --workspace
 ## Definition Of Done
 
 - Root help lists all top-level commands.
-- Every API route in `actr_api::route_manifest()` is covered by CLI integration
+- Every API route in `nestor_api::route_manifest()` is covered by CLI integration
   tests.
 - Every leaf command has help, an example, and a docs section.
-- `actr-memory guide commands` is compact enough for agent context.
-- `actr-memory guide workflow` prints a copy-pasteable workflow.
+- `nestor guide commands` is compact enough for agent context.
+- `nestor guide workflow` prints a copy-pasteable workflow.
 - Every `docs/cli/` page links back to [the CLI index](./README.md).
 - Root `README.md` links to `docs/cli/README.md`.
 - JSON output is parseable for JSON-producing commands.

@@ -20,8 +20,8 @@ round-trip as text. Use `number` and `bool` for typed facts.
 Any command with `--json-file` accepts exact API DTO JSON:
 
 ```sh
-actr-memory chunk put ignored --json-file chunk.json
-actr-memory retrieve --json-file - --format json
+nestor chunk put ignored --json-file chunk.json
+nestor retrieve --json-file - --format json
 ```
 
 `-` reads JSON from stdin.

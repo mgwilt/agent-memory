@@ -10,7 +10,7 @@ For the second deliverable, the report defines a **Codex-compatible goal system*
 
 ## Scope and assumptions
 
-This design assumes that the **LLM agent framework is unspecified**, so the ACT-R memory service is exposed as a **framework-neutral HTTP API** and can be called by a ReAct-style agent, a planner/executor loop, or a tool-using assistant. It also assumes **no high availability requirement**, per the user’s instruction, so the target deployment is **one Rust memory service plus one Memgraph instance** with persistent local storage and ordinary CI/CD, not clustering. The system is designed for a working set large enough that in-memory-only storage is undesirable, but small enough that candidate retrieval remains bounded through symbolic filtering and indexing.
+This design assumes that the **LLM agent framework is unspecified**, so the Nestor memory service is exposed as a **framework-neutral HTTP API** and can be called by a ReAct-style agent, a planner/executor loop, or a tool-using assistant. It also assumes **no high availability requirement**, per the user’s instruction, so the target deployment is **one Rust memory service plus one Memgraph instance** with persistent local storage and ordinary CI/CD, not clustering. The system is designed for a working set large enough that in-memory-only storage is undesirable, but small enough that candidate retrieval remains bounded through symbolic filtering and indexing.
 
 The report also assumes that the implementation should remain **cognitively interpretable**. That means chunks remain symbolic records, production rules remain inspectable, and activation components remain decomposable into base-level, spread, mismatch, and noise contributions rather than being collapsed into an opaque embedding-only score. Embeddings may be added later as an auxiliary source of association or candidate expansion, but they are not the primary retrieval mechanism in the version proposed here.
 
@@ -22,12 +22,12 @@ The architecture should be implemented as a **Cargo workspace** with at least si
 
 | Crate | Responsibility | Why it exists |
 |---|---|---|
-| `actr-core` | chunk types, slot values, activation math, decay, noise, latency, mismatch, spread | keeps ACT-R equations pure and unit-testable |
-| `actr-session` | buffers, session state machine, production cycle, per-agent actor/lock | preserves ACT-R serial semantics |
-| `actr-rules` | production rule DSL, matching, conflict resolution, utility updates | separates symbolic procedures from storage and transport |
-| `actr-store` | Memgraph repositories, Cypher builders, migrations/bootstrap, cache invalidation | isolates graph persistence concerns |
-| `actr-api` | Axum handlers, DTOs, auth, request validation, tracing context | framework-neutral HTTP interface |
-| `actr-ops` | metrics, health checks, config, deployment helpers, benchmark adapters | keeps runtime and CI concerns out of core logic |
+| `nestor-core` | chunk types, slot values, activation math, decay, noise, latency, mismatch, spread | keeps ACT-R equations pure and unit-testable |
+| `nestor-session` | buffers, session state machine, production cycle, per-agent actor/lock | preserves ACT-R serial semantics |
+| `nestor-rules` | production rule DSL, matching, conflict resolution, utility updates | separates symbolic procedures from storage and transport |
+| `nestor-store` | Memgraph repositories, Cypher builders, migrations/bootstrap, cache invalidation | isolates graph persistence concerns |
+| `nestor-api` | Axum handlers, DTOs, auth, request validation, tracing context | framework-neutral HTTP interface |
+| `nestor-ops` | metrics, health checks, config, deployment helpers, benchmark adapters | keeps runtime and CI concerns out of core logic |
 
 That modularization is a direct engineering translation of ACT-R’s modular architecture: buffers and production selection stay in the central runtime, while declarative memory remains a specialized module accessed through retrieval requests. It also fits the Rust ecosystem well: Tokio provides the async runtime, Axum provides ergonomic HTTP routing and optional SSE/WebSocket support, `thiserror` provides structured error types, `neo4rs` provides an async pooled Bolt client, and Criterion plus testcontainers support benchmark and integration-test workflows. citeturn17view0turn18view1turn32view0turn30view1turn30view2turn30view3turn29view0turn31view2turn30view5
 
@@ -35,11 +35,11 @@ The preferred runtime topology is shown below.
 
 ```mermaid
 flowchart LR
-    A[LLM Agent Orchestrator] --> B[actr-api]
-    B --> C[actr-session]
-    C --> D[actr-rules]
-    C --> E[actr-core]
-    C --> F[actr-store]
+    A[LLM Agent Orchestrator] --> B[nestor-api]
+    B --> C[nestor-session]
+    C --> D[nestor-rules]
+    C --> E[nestor-core]
+    C --> F[nestor-store]
     F --> G[(Memgraph)]
     C --> H[(In-process caches)]
     B --> I[/metrics]
@@ -56,33 +56,33 @@ The following mapping should be treated as the canonical handoff table for a cod
 
 | ACT-R concept | Rust module | Memgraph representation | Persistence rule |
 |---|---|---|---|
-| Chunk | `actr_core::chunk` | `(:Chunk {chunk_id, tenant_id, chunk_type, created_at, updated_at, slot_hash, retrieval_count, last_access_at, base_bias})` | durable |
-| Chunk slot | `actr_core::slot` | `(c:Chunk)-[:HAS_SLOT {key, value_type}]->(v:SlotValue)` | durable |
-| Slot value symbol | `actr_core::symbol` | `(:SlotValue {tenant_id, key, value_norm, value_hash})` | durable |
-| Declarative memory | `actr_store::declarative_repo` | entire `Chunk/SlotValue/ASSOCIATED/Practice*` graph | durable |
-| Goal buffer | `actr_session::buffers::goal` | optional audit snapshots only | hot in memory |
-| Retrieval buffer | `actr_session::buffers::retrieval` | optional audit snapshots only | hot in memory |
-| Imaginal/task buffer | `actr_session::buffers::*` | optional audit snapshots only | hot in memory |
-| Base-level activation | `actr_core::activation::base_level` | recent timestamps + compressed practice bins on chunk or related nodes | durable inputs, computed in Rust |
-| Spreading activation | `actr_core::activation::spread` | `(:Chunk)-[:ASSOCIATED {strength, source, fan}]->(:Chunk)` and slot-value neighborhoods | durable inputs, computed in Rust |
-| Noise | `actr_core::activation::noise` | none, except audit seed/log if needed | computed in Rust |
-| Partial matching | `actr_core::activation::mismatch` | slot/value graph plus optional similarity tables | computed in Rust |
-| Production rule | `actr_rules::rule` | `(:ProductionRule {rule_id, name, enabled, utility, avg_reward, success_count, failure_count, version})` | durable metadata |
-| Procedural memory | `actr_rules::engine` | rule nodes + optional audit edges | hot execution, durable stats |
-| Production utility | `actr_rules::utility` | `utility`, reward history summaries, counters on `ProductionRule` | durable inputs, computed in Rust |
-| Buffer snapshot/audit | `actr_ops::audit` | `(:BufferSnapshot)` or `(:Episode)-[:HAS_SNAPSHOT]->(:BufferSnapshot)` | append-only |
+| Chunk | `nestor_core::chunk` | `(:Chunk {chunk_id, tenant_id, chunk_type, created_at, updated_at, slot_hash, retrieval_count, last_access_at, base_bias})` | durable |
+| Chunk slot | `nestor_core::slot` | `(c:Chunk)-[:HAS_SLOT {key, value_type}]->(v:SlotValue)` | durable |
+| Slot value symbol | `nestor_core::symbol` | `(:SlotValue {tenant_id, key, value_norm, value_hash})` | durable |
+| Declarative memory | `nestor_store::declarative_repo` | entire `Chunk/SlotValue/ASSOCIATED/Practice*` graph | durable |
+| Goal buffer | `nestor_session::buffers::goal` | optional audit snapshots only | hot in memory |
+| Retrieval buffer | `nestor_session::buffers::retrieval` | optional audit snapshots only | hot in memory |
+| Imaginal/task buffer | `nestor_session::buffers::*` | optional audit snapshots only | hot in memory |
+| Base-level activation | `nestor_core::activation::base_level` | recent timestamps + compressed practice bins on chunk or related nodes | durable inputs, computed in Rust |
+| Spreading activation | `nestor_core::activation::spread` | `(:Chunk)-[:ASSOCIATED {strength, source, fan}]->(:Chunk)` and slot-value neighborhoods | durable inputs, computed in Rust |
+| Noise | `nestor_core::activation::noise` | none, except audit seed/log if needed | computed in Rust |
+| Partial matching | `nestor_core::activation::mismatch` | slot/value graph plus optional similarity tables | computed in Rust |
+| Production rule | `nestor_rules::rule` | `(:ProductionRule {rule_id, name, enabled, utility, avg_reward, success_count, failure_count, version})` | durable metadata |
+| Procedural memory | `nestor_rules::engine` | rule nodes + optional audit edges | hot execution, durable stats |
+| Production utility | `nestor_rules::utility` | `utility`, reward history summaries, counters on `ProductionRule` | durable inputs, computed in Rust |
+| Buffer snapshot/audit | `nestor_ops::audit` | `(:BufferSnapshot)` or `(:Episode)-[:HAS_SNAPSHOT]->(:BufferSnapshot)` | append-only |
 
 A typical retrieval cycle should look like this.
 
 ```mermaid
 sequenceDiagram
     participant Agent as LLM Agent
-    participant API as actr-api
-    participant Session as actr-session
-    participant Store as actr-store
+    participant API as nestor-api
+    participant Session as nestor-session
+    participant Store as nestor-store
     participant MG as Memgraph
-    participant Core as actr-core
-    participant Rules as actr-rules
+    participant Core as nestor-core
+    participant Rules as nestor-rules
 
     Agent->>API: POST /v1/memory/retrieve
     API->>Session: load session + lock agent thread
@@ -387,8 +387,8 @@ entrypoint: .codex/goals/G05-retrieval-pipeline/prompt.md
 output_schema: .codex/goals/G05-retrieval-pipeline/output.schema.json
 verify: .codex/goals/G05-retrieval-pipeline/verify.sh
 artifacts:
-  - crates/actr-store/src/retrieval.rs
-  - crates/actr-core/src/activation.rs
+  - crates/nestor-store/src/retrieval.rs
+  - crates/nestor-core/src/activation.rs
   - tests/integration/retrieval_pipeline.rs
 ```
 
@@ -425,7 +425,7 @@ The dependency graph for the goals is:
 **Example Codex prompt:**
 ```text
 Goal: Scaffold the ACT-R memory system repository as a Cargo workspace.
-Context: Create crates actr-core, actr-session, actr-rules, actr-store, actr-api, actr-ops.
+Context: Create crates nestor-core, nestor-session, nestor-rules, nestor-store, nestor-api, nestor-ops.
 Constraints: Rust stable, no business logic yet, no HA, include AGENTS.md with build/test/lint commands, keep modules minimal but compilable.
 Done when: cargo check passes, AGENTS.md exists, .codex/goals directory exists with a reusable template.
 ```
@@ -446,7 +446,7 @@ Done when: cargo check passes, AGENTS.md exists, .codex/goals directory exists w
 
 **Example Codex prompt:**
 ```text
-Goal: Add a local Memgraph development stack for the ACT-R memory project.
+Goal: Add a local Memgraph development stack for the Nestor memory project.
 Context: Use Docker Compose. Include Memgraph with persistent volumes and a bootstrap step for constraints and indexes.
 Constraints: No HA, expose Bolt and metrics ports, keep startup deterministic.
 Done when: docker compose up -d starts Memgraph, bootstrap Cypher runs successfully, and a health check confirms the DB is ready.
@@ -469,14 +469,14 @@ Done when: docker compose up -d starts Memgraph, bootstrap Cypher runs successfu
 **Example Codex prompt for code and unit tests:**
 ```text
 Goal: Implement the ACT-R core math and domain model.
-Context: Add chunk, slot, activation_component, scored_chunk, retrieval_threshold, latency_estimator, noise source, and utility update functions in actr-core.
+Context: Add chunk, slot, activation_component, scored_chunk, retrieval_threshold, latency_estimator, noise source, and utility update functions in nestor-core.
 Constraints: Pure functions only; deterministic mode for tests; document formulas in rustdoc.
-Done when: cargo test -p actr-core passes and includes unit tests for base-level scoring, spreading activation composition, threshold misses, latency behavior, and deterministic noise.
+Done when: cargo test -p nestor-core passes and includes unit tests for base-level scoring, spreading activation composition, threshold misses, latency behavior, and deterministic noise.
 ```
 
 **Acceptance criteria:** pure functions with no DB dependency; deterministic tests pass; public APIs documented.
 
-**Verification:** `cargo test -p actr-core`
+**Verification:** `cargo test -p nestor-core`
 
 **CI integration:** mandatory PR gate.
 
@@ -491,14 +491,14 @@ Done when: cargo test -p actr-core passes and includes unit tests for base-level
 **Example Codex prompt:**
 ```text
 Goal: Implement the Memgraph persistence layer for chunks, slot values, associations, and production rules.
-Context: Use an async Bolt-compatible Rust driver. Add repository traits plus a Memgraph implementation in actr-store.
+Context: Use an async Bolt-compatible Rust driver. Add repository traits plus a Memgraph implementation in nestor-store.
 Constraints: Use explicit transactions where needed; separate read and write methods; make Cypher strings testable.
 Done when: integration tests can upsert a chunk, fetch it back, persist associations, and enforce uniqueness constraints.
 ```
 
 **Acceptance criteria:** repository tests pass against a real Memgraph instance; migrations/bootstrap idempotent.
 
-**Verification:** `cargo test -p actr-store -- --nocapture`
+**Verification:** `cargo test -p nestor-store -- --nocapture`
 
 **CI integration:** service-container or testcontainers-backed integration job.
 
@@ -522,7 +522,7 @@ Done when: integration tests prove exact-match retrieval, threshold miss behavio
 
 **Verification:** `cargo test retrieval_pipeline -- --nocapture`
 
-**CI integration:** must run on PRs touching `actr-core` or `actr-store`.
+**CI integration:** must run on PRs touching `nestor-core` or `nestor-store`.
 
 ### 6. G06 session state and ACT-R buffer semantics
 
@@ -542,7 +542,7 @@ Done when: unit tests demonstrate serialized mutation, buffer replacement, and r
 
 **Acceptance criteria:** concurrent tests show no torn buffer state; one-step-at-a-time semantics enforced.
 
-**Verification:** `cargo test -p actr-session`
+**Verification:** `cargo test -p nestor-session`
 
 **CI integration:** PR gate.
 
@@ -564,7 +564,7 @@ Done when: tests cover rule matching, conflict resolution, reward updates, and a
 
 **Acceptance criteria:** rules are deterministic in deterministic mode; utility updates are persisted correctly through the repository interface.
 
-**Verification:** `cargo test -p actr-rules`
+**Verification:** `cargo test -p nestor-rules`
 
 **CI integration:** PR gate when rules or session code changes.
 
@@ -586,7 +586,7 @@ Done when: end-to-end API tests pass and example curl requests in docs are corre
 
 **Acceptance criteria:** API tests pass; OpenAPI or JSON-schema-like docs generated if chosen.
 
-**Verification:** `cargo test -p actr-api && cargo run -p actr-api`
+**Verification:** `cargo test -p nestor-api && cargo run -p nestor-api`
 
 **CI integration:** PR gate; optional container image build thereafter.
 
@@ -600,7 +600,7 @@ Done when: end-to-end API tests pass and example curl requests in docs are corre
 
 **Example Codex prompt for integration tests:**
 ```text
-Goal: Add comprehensive tests and reproducible benchmarks for the ACT-R memory service.
+Goal: Add comprehensive tests and reproducible benchmarks for the Nestor memory service.
 Context: Use testcontainers or Docker-backed integration tests for Memgraph and Criterion for retrieval performance benchmarks.
 Constraints: Deterministic seeds, bounded fixture sizes, no flaky timing assertions.
 Done when: cargo test passes, integration tests run against Memgraph, and benchmark targets produce stable baseline reports.

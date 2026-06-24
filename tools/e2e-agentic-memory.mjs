@@ -114,7 +114,7 @@ async function main() {
     log(`running Rust HTTP/formula integration test`);
     await runCommand(
       'cargo',
-      ['test', '-p', 'actr-api', '--test', 'http_end_to_end', '--', '--nocapture'],
+      ['test', '-p', 'nestor-api', '--test', 'http_end_to_end', '--', '--nocapture'],
       'rust-test.log',
     );
     pass('rust integration test passed');
@@ -128,10 +128,10 @@ async function main() {
     apiBaseUrl = `http://127.0.0.1:${port}`;
     spawnedApi = await startApi(port);
   } else {
-    log(`using existing ACT-R API: ${apiBaseUrl}`);
+    log(`using existing Nestor API: ${apiBaseUrl}`);
     await waitForApi(apiBaseUrl, null, 15_000);
   }
-  pass('ACT-R API is reachable');
+  pass('Nestor API is reachable');
 
   const agentId = `agentic-${Date.now()}`;
   const lmstudio = createOpenAICompatible({
@@ -388,7 +388,7 @@ async function exerciseApiWorkflow(agentId, plan, model) {
 
   const answerPrompt = [
     'Return only JSON. Do not use markdown.',
-    'You are an agent answering a user after retrieving ACT-R memory.',
+    'You are an agent answering a user after retrieving Nestor memory.',
     'User asks: "What should I prepare for Eli before debugging?"',
     `Retrieved memory JSON: ${JSON.stringify(retrieval.results[0])}`,
     `Selected production rule: ${JSON.stringify(rule.selected)}`,
@@ -412,10 +412,10 @@ async function exerciseApiWorkflow(agentId, plan, model) {
   assertEqual(deleted.deleted, true, 'delete response');
 
   const metrics = await requestText('GET', '/metrics', 'GET /metrics');
-  if (!metrics.includes('actr_memory_retrieval_hits_total 2')) {
+  if (!metrics.includes('nestor_memory_retrieval_hits_total 2')) {
     throw new Error('metrics did not report two retrieval hits');
   }
-  if (!metrics.includes('actr_memory_candidates_examined 1')) {
+  if (!metrics.includes('nestor_memory_candidates_examined 1')) {
     throw new Error('metrics did not report one candidate examined');
   }
   pass('metrics endpoint recorded retrieval behavior');
@@ -448,12 +448,12 @@ async function inferText(model, prompt) {
 
 async function startApi(port) {
   const apiLog = createWriteStream(path.join(runDir, 'api-server.log'), { flags: 'a' });
-  log(`starting ACT-R API on ${apiBaseUrl}`);
-  const child = spawn('cargo', ['run', '-p', 'actr-api', '--', 'serve'], {
+  log(`starting Nestor API on ${apiBaseUrl}`);
+  const child = spawn('cargo', ['run', '-p', 'nestor-api', '--', 'serve'], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
-      ACTR_API_BIND_ADDR: `127.0.0.1:${port}`,
+      NESTOR_API_BIND_ADDR: `127.0.0.1:${port}`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -484,7 +484,7 @@ async function waitForApi(baseUrl, exited, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (exited && exited()) {
-      throw new Error('ACT-R API process exited before becoming ready');
+      throw new Error('Nestor API process exited before becoming ready');
     }
     try {
       const response = await fetchJson(joinUrl(baseUrl, 'healthz'), { timeoutMs: 1_000 });
@@ -495,7 +495,7 @@ async function waitForApi(baseUrl, exited, timeoutMs) {
       await delay(500);
     }
   }
-  throw new Error(`ACT-R API did not become ready within ${timeoutMs}ms`);
+  throw new Error(`Nestor API did not become ready within ${timeoutMs}ms`);
 }
 
 async function stopApi(api) {
@@ -782,10 +782,10 @@ function parseArgs(argv) {
   const parsed = {
     lmstudioUrl: process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234/v1',
     model: process.env.LMSTUDIO_MODEL || 'qwen/qwen3.6-27b',
-    apiUrl: process.env.ACTR_E2E_API_URL || '',
+    apiUrl: process.env.NESTOR_E2E_API_URL || '',
     artifactsDir:
-      process.env.ACTR_E2E_ARTIFACTS_DIR || path.join(REPO_ROOT, 'artifacts/e2e-agentic-memory'),
-    skipRustTest: process.env.ACTR_E2E_SKIP_RUST_TEST === '1',
+      process.env.NESTOR_E2E_ARTIFACTS_DIR || path.join(REPO_ROOT, 'artifacts/e2e-agentic-memory'),
+    skipRustTest: process.env.NESTOR_E2E_SKIP_RUST_TEST === '1',
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -827,7 +827,7 @@ function printHelp() {
 Options:
   --lmstudio-url <url>   LM Studio OpenAI-compatible base URL (default: http://localhost:1234/v1)
   --model <id>           LM Studio model id (default: qwen/qwen3.6-27b)
-  --api-url <url>        Use an already running ACT-R API instead of starting cargo run
+  --api-url <url>        Use an already running Nestor API instead of starting cargo run
   --artifacts-dir <dir>  Artifact root (default: artifacts/e2e-agentic-memory)
   --skip-rust-test       Skip the deterministic Rust integration test
 `);

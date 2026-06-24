@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-migration_dir="${MIGRATION_DIR:-crates/actr-store/migrations}"
+migration_dir="${MIGRATION_DIR:-crates/nestor-store/migrations}"
 service="${MEMGRAPH_SERVICE:-memgraph}"
 
 apply_statement() {

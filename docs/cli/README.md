@@ -1,15 +1,15 @@
-# ACT-R Memory CLI
+# Nestor CLI
 
-The `actr-memory` CLI is the agent-friendly command surface for the ACT-R memory
+The `nestor` CLI is the agent-friendly command surface for the Nestor memory
 API. It keeps the first help screen compact, then exposes deeper command,
 workflow, slot, and error documentation only when requested.
 
 Shortest path:
 
 ```sh
-actr-memory guide
-actr-memory doctor
-actr-memory guide workflow
+nestor guide
+nestor doctor
+nestor guide workflow
 ```
 
 ## Documentation Index

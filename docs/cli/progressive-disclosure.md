@@ -21,9 +21,9 @@ References:
 Level 0:
 
 ```sh
-actr-memory --help
-actr-memory guide
-actr-memory guide commands
+nestor --help
+nestor guide
+nestor guide commands
 ```
 
 Shows the command map, global options, and next drill-down commands.
@@ -31,9 +31,9 @@ Shows the command map, global options, and next drill-down commands.
 Level 1:
 
 ```sh
-actr-memory chunk
-actr-memory buffer
-actr-memory rule
+nestor chunk
+nestor buffer
+nestor rule
 ```
 
 Calling a command group without a subcommand prints valid subcommands, one-line
@@ -42,9 +42,9 @@ purposes, and next actions.
 Level 2:
 
 ```sh
-actr-memory chunk put --help
-actr-memory retrieve --help
-actr-memory rule eval --help
+nestor chunk put --help
+nestor retrieve --help
+nestor rule eval --help
 ```
 
 Leaf help includes purpose, endpoint, required args, defaults, examples, and
@@ -53,10 +53,10 @@ links to relevant docs.
 Level 3:
 
 ```sh
-actr-memory guide slots
-actr-memory guide workflow
-actr-memory guide errors
-actr-memory guide docs
+nestor guide slots
+nestor guide workflow
+nestor guide errors
+nestor guide docs
 ```
 
 Deep guides explain slot grammar, full workflows, error recovery, and the docs

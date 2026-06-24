@@ -25,7 +25,7 @@ Endpoint: none.
 Example:
 
 ```sh
-actr-memory guide workflow
+nestor guide workflow
 ```
 
 Related: [Progressive Disclosure](./progressive-disclosure.md).
@@ -39,7 +39,7 @@ Endpoint: local API listener.
 Example:
 
 ```sh
-actr-memory serve --bind 127.0.0.1:8090
+nestor serve --bind 127.0.0.1:8090
 ```
 
 Related: [Architecture](./architecture.md).
@@ -59,8 +59,8 @@ Endpoints:
 Examples:
 
 ```sh
-actr-memory doctor
-actr-memory metrics --grep retrieval_hits
+nestor doctor
+nestor metrics --grep retrieval_hits
 ```
 
 Related: [Output And Errors](./output-and-errors.md).
@@ -80,7 +80,7 @@ Options: `--slot`, `--now-ms`, `--json-file`.
 Example:
 
 ```sh
-actr-memory --agent agent-1 chunk put mem-preference --type fact \
+nestor --agent agent-1 chunk put mem-preference --type fact \
   --slot topic=symbol:preference
 ```
 
@@ -95,7 +95,7 @@ Required: `--agent`, `<CHUNK_ID>`.
 Example:
 
 ```sh
-actr-memory --agent agent-1 chunk get mem-preference
+nestor --agent agent-1 chunk get mem-preference
 ```
 
 Related: [Workflows](./workflows.md).
@@ -111,7 +111,7 @@ Options: `--slot`, `--json-file`.
 Example:
 
 ```sh
-actr-memory --agent agent-1 chunk patch mem-preference \
+nestor --agent agent-1 chunk patch mem-preference \
   --expected-version 1 \
   --slot verified=bool:true
 ```
@@ -127,7 +127,7 @@ Required: `--agent`, `<CHUNK_ID>`, `--yes`.
 Example:
 
 ```sh
-actr-memory --agent agent-1 chunk delete old-fact --yes
+nestor --agent agent-1 chunk delete old-fact --yes
 ```
 
 Related: [Output And Errors](./output-and-errors.md).
@@ -148,7 +148,7 @@ Options: `--type`, `--cue`, `--context`, `--candidate-limit`,
 Example:
 
 ```sh
-actr-memory --agent agent-1 retrieve --type fact \
+nestor --agent agent-1 retrieve --type fact \
   --cue topic=symbol:preference \
   --context ctx-goal \
   --threshold -10
@@ -167,7 +167,7 @@ Options: `--weight`, `--at-ms`, `--event-id`, `--json-file`.
 Example:
 
 ```sh
-actr-memory --agent agent-1 practice mem-preference --kind retrieve --weight 2
+nestor --agent agent-1 practice mem-preference --kind retrieve --weight 2
 ```
 
 Related: [Workflows](./workflows.md).
@@ -184,7 +184,7 @@ Options: `--fan`, `--at-ms`, `--json-file`.
 Example:
 
 ```sh
-actr-memory --agent agent-1 associate ctx-goal mem-preference \
+nestor --agent agent-1 associate ctx-goal mem-preference \
   --source goal \
   --strength 1.25
 ```
@@ -204,7 +204,7 @@ Options: `--at-ms`, `--json-file`.
 Example:
 
 ```sh
-actr-memory --agent agent-1 buffer set goal ctx-goal
+nestor --agent agent-1 buffer set goal ctx-goal
 ```
 
 Related: [Workflows](./workflows.md).
@@ -222,7 +222,7 @@ Options: `--candidate-rule`, `--rules-file`, `--retrieved`, `--json-file`.
 Example:
 
 ```sh
-actr-memory --agent agent-1 rule eval \
+nestor --agent agent-1 rule eval \
   --retrieved mem-preference \
   --rules-file rules.json
 ```

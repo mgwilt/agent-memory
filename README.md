@@ -1,4 +1,4 @@
-# ACT-R Agent Memory
+# Nestor
 
 This repository is scaffolded from the ACT-R research and engineering reports in
 `research/`. It defines a Rust workspace for an ACT-R-inspired memory service for
@@ -15,12 +15,12 @@ The architecture follows the reports' central split:
 
 | Crate | Responsibility |
 | --- | --- |
-| `actr-core` | Pure domain types, activation formulas, latency, thresholding, noise, utility math |
-| `actr-session` | ACT-R buffer state and per-agent session serialization primitives |
-| `actr-rules` | Symbolic production rule matching and utility ranking |
-| `actr-store` | Memgraph schema, Cypher, repository contracts, migration registry |
-| `actr-api` | Axum HTTP API, JSON DTOs, route manifest, and in-memory service wiring |
-| `actr-ops` | Runtime config, health checks, metric names, ops constants |
+| `nestor-core` | Pure domain types, activation formulas, latency, thresholding, noise, utility math |
+| `nestor-session` | ACT-R buffer state and per-agent session serialization primitives |
+| `nestor-rules` | Symbolic production rule matching and utility ranking |
+| `nestor-store` | Memgraph schema, Cypher, repository contracts, migration registry |
+| `nestor-api` | Axum HTTP API, JSON DTOs, route manifest, and in-memory service wiring |
+| `nestor-ops` | Runtime config, health checks, metric names, ops constants |
 
 The first scaffold intentionally avoids external crates so it can compile in a
 restricted environment. Later goals add the recommended runtime stack: Tokio,
@@ -49,28 +49,28 @@ Run the reproducible Criterion benchmark suite for activation and retrieval hot
 paths:
 
 ```sh
-cargo bench -p actr-store --bench activation_retrieval
+cargo bench -p nestor-store --bench activation_retrieval
 ```
 
 Create and compare local benchmark baselines with relative Criterion reports:
 
 ```sh
-cargo bench -p actr-store --bench activation_retrieval -- --save-baseline local
-cargo bench -p actr-store --bench activation_retrieval -- --baseline local
+cargo bench -p nestor-store --bench activation_retrieval -- --save-baseline local
+cargo bench -p nestor-store --bench activation_retrieval -- --baseline local
 ```
 
 Print the API route manifest:
 
 ```sh
-cargo run -p actr-api -- manifest
+cargo run -p nestor-api -- manifest
 ```
 
 Use the agent-friendly Rust CLI:
 
 ```sh
-cargo run -p actr-cli -- guide
-cargo run -p actr-cli -- doctor
-cargo run -p actr-cli -- guide workflow
+cargo run -p nestor-cli -- guide
+cargo run -p nestor-cli -- doctor
+cargo run -p nestor-cli -- guide workflow
 ```
 
 CLI architecture, command reference, workflows, and progressive-disclosure
@@ -80,12 +80,12 @@ Start the local Axum API with the in-memory repository used by the current
 service wiring:
 
 ```sh
-cargo run -p actr-api -- serve
+cargo run -p nestor-api -- serve
 ```
 
 By default the server binds to `127.0.0.1:8080`. Override it with
-`ACTR_API_BIND_ADDR`, for example `ACTR_API_BIND_ADDR=127.0.0.1:8090`.
-When stdout is redirected, `cargo run -p actr-api` prints the route manifest so
+`NESTOR_API_BIND_ADDR`, for example `NESTOR_API_BIND_ADDR=127.0.0.1:8090`.
+When stdout is redirected, `cargo run -p nestor-api` prints the route manifest so
 automation can verify the binary without hanging on a long-running server.
 
 ## HTTP API Examples
@@ -97,7 +97,7 @@ curl -sS http://127.0.0.1:8080/v1/memory/chunks \
   -H 'content-type: application/json' \
   -d '{
     "agent_id": "agent-1",
-    "chunk_id": "ck-actr",
+    "chunk_id": "ck-nestor",
     "chunk_type": "fact",
     "now_ms": 1000,
     "slots": {
@@ -129,7 +129,7 @@ curl -sS http://127.0.0.1:8080/v1/memory/practice \
   -H 'content-type: application/json' \
   -d '{
     "agent_id": "agent-1",
-    "chunk_id": "ck-actr",
+    "chunk_id": "ck-nestor",
     "event_id": "practice-1",
     "kind": "retrieve",
     "weight": 1.0,
@@ -140,8 +140,8 @@ curl -sS http://127.0.0.1:8080/v1/memory/associate \
   -H 'content-type: application/json' \
   -d '{
     "agent_id": "agent-1",
-    "src_chunk_id": "ck-actr",
-    "dst_chunk_id": "ck-actr",
+    "src_chunk_id": "ck-nestor",
+    "dst_chunk_id": "ck-nestor",
     "source": "goal",
     "strength": 1.5
   }'
@@ -151,7 +151,7 @@ curl -sS http://127.0.0.1:8080/v1/memory/buffers/goal \
   -H 'content-type: application/json' \
   -d '{
     "agent_id": "agent-1",
-    "chunk_id": "ck-actr",
+    "chunk_id": "ck-nestor",
     "set_at_ms": 2500
   }'
 
@@ -196,7 +196,7 @@ conflicts; start it with `docker compose --profile dashboards up -d` when port
 `3000` is free.
 
 The bootstrap script applies ordered Cypher migrations from
-`crates/actr-store/migrations/`. It is safe to rerun during local development:
+`crates/nestor-store/migrations/`. It is safe to rerun during local development:
 existing constraints and indexes are skipped, while other Cypher errors still
 fail the script. The schema intentionally creates explicit indexes in addition
 to constraints because Memgraph constraints do not create indexes.
@@ -209,7 +209,7 @@ bootstrap step.
 Run the opt-in live Memgraph integration test after the stack is ready:
 
 ```sh
-ACTR_STORE_MEMGRAPH_TESTS=1 cargo test -p actr-store --test memgraph_live -- --nocapture
+NESTOR_STORE_MEMGRAPH_TESTS=1 cargo test -p nestor-store --test memgraph_live -- --nocapture
 ```
 
 Normal `cargo test --workspace` runs remain deterministic and do not require

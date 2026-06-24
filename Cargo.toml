@@ -1,13 +1,13 @@
 [workspace]
 members = [
-    "crates/actr-client",
-    "crates/actr-cli",
-    "crates/actr-api",
-    "crates/actr-core",
-    "crates/actr-ops",
-    "crates/actr-rules",
-    "crates/actr-session",
-    "crates/actr-store",
+    "crates/nestor-client",
+    "crates/nestor-cli",
+    "crates/nestor-api",
+    "crates/nestor-core",
+    "crates/nestor-ops",
+    "crates/nestor-rules",
+    "crates/nestor-session",
+    "crates/nestor-store",
 ]
 resolver = "3"
 
@@ -18,13 +18,13 @@ repository = "https://example.invalid/agent-memory"
 rust-version = "1.85"
 
 [workspace.dependencies]
-actr-api = { path = "crates/actr-api" }
-actr-client = { path = "crates/actr-client" }
-actr-core = { path = "crates/actr-core" }
-actr-ops = { path = "crates/actr-ops" }
-actr-rules = { path = "crates/actr-rules" }
-actr-session = { path = "crates/actr-session" }
-actr-store = { path = "crates/actr-store" }
+nestor-api = { path = "crates/nestor-api" }
+nestor-client = { path = "crates/nestor-client" }
+nestor-core = { path = "crates/nestor-core" }
+nestor-ops = { path = "crates/nestor-ops" }
+nestor-rules = { path = "crates/nestor-rules" }
+nestor-session = { path = "crates/nestor-session" }
+nestor-store = { path = "crates/nestor-store" }
 axum = "0.8.4"
 clap = { version = "4.6.1", default-features = false, features = ["std", "help", "usage", "error-context"] }
 serde = { version = "1.0.219", features = ["derive"] }

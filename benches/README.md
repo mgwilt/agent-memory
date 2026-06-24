@@ -1,19 +1,19 @@
 # Benchmarks
 
-Criterion benchmarks live here and are wired through the `actr-store` package so
+Criterion benchmarks live here and are wired through the `nestor-store` package so
 workspace `--all-targets` checks compile them.
 
 Run the deterministic activation and retrieval hot-path suite:
 
 ```sh
-cargo bench -p actr-store --bench activation_retrieval
+cargo bench -p nestor-store --bench activation_retrieval
 ```
 
 Create a local baseline report, then compare future runs against it:
 
 ```sh
-cargo bench -p actr-store --bench activation_retrieval -- --save-baseline local
-cargo bench -p actr-store --bench activation_retrieval -- --baseline local
+cargo bench -p nestor-store --bench activation_retrieval -- --save-baseline local
+cargo bench -p nestor-store --bench activation_retrieval -- --baseline local
 ```
 
 Regression gates should use Criterion's relative baseline comparisons. Avoid

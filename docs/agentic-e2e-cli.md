@@ -10,7 +10,7 @@ The command:
 
 - runs the deterministic Rust HTTP/formula integration test;
 - verifies LM Studio is serving `qwen/qwen3.6-27b` at `http://localhost:1234/v1`;
-- starts the ACT-R API on an ephemeral localhost port;
+- starts the Nestor API on an ephemeral localhost port;
 - asks the local model for a memory-write plan through AI SDK;
 - exercises every HTTP API endpoint;
 - validates created memory, retrieval behavior, production-rule selection, metrics, and retrieval formulas;

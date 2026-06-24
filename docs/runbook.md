@@ -20,7 +20,7 @@ OpenMetrics `9091`, and Prometheus `9090`. Prometheus scrapes Memgraph through
 Run the retrieval demo against a non-default API URL when needed:
 
 ```sh
-ACTR_API_URL=http://127.0.0.1:8090 ./scripts/demo-retrieval.sh
+NESTOR_API_URL=http://127.0.0.1:8090 ./scripts/demo-retrieval.sh
 ```
 
 Stop the stack:
@@ -40,22 +40,22 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## Runtime Configuration
 
-Use `ACTR_PROFILE=development`, `ACTR_PROFILE=staging`, or
-`ACTR_PROFILE=production` to select validated defaults. Production rejects
+Use `NESTOR_PROFILE=development`, `NESTOR_PROFILE=staging`, or
+`NESTOR_PROFILE=production` to select validated defaults. Production rejects
 loopback Memgraph URIs and requires TLS plus a credential source.
 
 For staged or production deployments, provide Memgraph credentials through
 runtime secrets rather than checked-in files:
 
 ```sh
-ACTR_PROFILE=production
-ACTR_MEMGRAPH_URI=bolt+s://memgraph.production.internal:7687
-ACTR_MEMGRAPH_TLS_ENABLED=true
-ACTR_MEMGRAPH_TLS_SERVER_NAME=memgraph.production.internal
-ACTR_MEMGRAPH_PASSWORD_FILE=/run/secrets/memgraph-password
+NESTOR_PROFILE=production
+NESTOR_MEMGRAPH_URI=bolt+s://memgraph.production.internal:7687
+NESTOR_MEMGRAPH_TLS_ENABLED=true
+NESTOR_MEMGRAPH_TLS_SERVER_NAME=memgraph.production.internal
+NESTOR_MEMGRAPH_PASSWORD_FILE=/run/secrets/memgraph-password
 ```
 
-Use `ACTR_MEMGRAPH_TLS_CA_FILE` when the Memgraph certificate chain needs a
+Use `NESTOR_MEMGRAPH_TLS_CA_FILE` when the Memgraph certificate chain needs a
 mounted CA bundle. Do not commit passwords, generated certificates, private
 keys, or local `.env` files.
 
@@ -77,6 +77,6 @@ keys, or local `.env` files.
 - If Memgraph metrics are missing, confirm Prometheus can reach `memgraph:9091`
   from the Compose network.
 - If service metrics are missing, confirm the API is serving `/metrics` and that
-  the `actr-memory` Prometheus target reaches `api:8080`.
+  the `nestor` Prometheus target reaches `api:8080`.
 - If retrieval tests become nondeterministic, check that noise uses deterministic
   seeds in test mode.

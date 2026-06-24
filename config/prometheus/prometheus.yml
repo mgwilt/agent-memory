@@ -11,7 +11,7 @@ scrape_configs:
           - memgraph:9091
 
   # The Rust API exposes Prometheus text at /metrics in the Compose network.
-  - job_name: actr-memory
+  - job_name: nestor
     metrics_path: /metrics
     static_configs:
       - targets:

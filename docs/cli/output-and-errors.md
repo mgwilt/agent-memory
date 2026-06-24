@@ -39,7 +39,7 @@ Every error should say what failed and where to go next:
 ```text
 [error] invalid slot value "topic=preference"
 Use typed values: --slot key=symbol:value
-Explore: actr-memory guide slots
+Explore: nestor guide slots
 ```
 
 See [Progressive Disclosure](./progressive-disclosure.md) and

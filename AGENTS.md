@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository is a Rust workspace for an ACT-R-inspired memory service backed by Memgraph. Source code lives under `crates/`: `actr-core` contains pure domain math and types, `actr-session` owns buffer/session state, `actr-rules` implements production rules, `actr-store` contains Memgraph schema and repository code, `actr-api` defines API DTOs/routes, and `actr-ops` holds config, health, and metrics helpers. Integration test scaffolding lives in `tests/integration/`, benchmark notes in `benches/`, runtime scripts in `scripts/`, documentation in `docs/`, and research/planning material in `research/` and `.goals/`.
+This repository is a Rust workspace for an ACT-R-inspired memory service backed by Memgraph. Source code lives under `crates/`: `nestor-core` contains pure domain math and types, `nestor-session` owns buffer/session state, `nestor-rules` implements production rules, `nestor-store` contains Memgraph schema and repository code, `nestor-api` defines API DTOs/routes, and `nestor-ops` holds config, health, and metrics helpers. Integration test scaffolding lives in `tests/integration/`, benchmark notes in `benches/`, runtime scripts in `scripts/`, documentation in `docs/`, and research/planning material in `research/` and `.goals/`.
 
 ## Build, Test, and Development Commands
 
@@ -16,7 +16,7 @@ This repository is a Rust workspace for an ACT-R-inspired memory service backed 
 
 ## Coding Style & Naming Conventions
 
-Use standard Rust formatting with four-space indentation through `rustfmt`. Keep `actr-core` deterministic and free of I/O, clocks, database access, or HTTP concerns. Use `snake_case` for modules, functions, and variables; `PascalCase` for types and traits; and descriptive crate-local module names such as `activation`, `repository`, or `buffers`. Avoid `unwrap`, `dbg!`, and committed `todo!`; workspace lints deny them.
+Use standard Rust formatting with four-space indentation through `rustfmt`. Keep `nestor-core` deterministic and free of I/O, clocks, database access, or HTTP concerns. Use `snake_case` for modules, functions, and variables; `PascalCase` for types and traits; and descriptive crate-local module names such as `activation`, `repository`, or `buffers`. Avoid `unwrap`, `dbg!`, and committed `todo!`; workspace lints deny them.
 
 ## Testing Guidelines
 
@@ -30,4 +30,4 @@ Keep each commit focused. Examples: `feat(rules): add retrieval condition matchi
 
 ## Security & Configuration Tips
 
-Do not commit secrets, local `.env` files, database dumps, or runtime volume data. Keep reusable examples in `.env.example` or docs. Memgraph migrations belong in `crates/actr-store/migrations/`; local data belongs in ignored Docker volumes or runtime directories.
+Do not commit secrets, local `.env` files, database dumps, or runtime volume data. Keep reusable examples in `.env.example` or docs. Memgraph migrations belong in `crates/nestor-store/migrations/`; local data belongs in ignored Docker volumes or runtime directories.
