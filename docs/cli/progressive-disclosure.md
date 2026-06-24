@@ -6,10 +6,11 @@ Progressive disclosure is a product requirement for this CLI. Agents should see
 only the smallest useful command map at first, then drill into command groups,
 leaf help, and long-form documentation on demand.
 
-This follows the same direction as Anthropic's agent documentation: skills keep
-long instructions unloaded until used, and tool descriptions influence when a
-model chooses a tool. The practical rule here is simple: always-loaded help must
-stay compact, while deeper instructions must be easy to discover.
+This follows Anthropic's agent documentation pattern: keep always-loaded context
+small, use short descriptions to help the model choose the right tool or command,
+and load detailed instructions only when the task calls for them. The practical
+rule here is simple: root help should orient, group help should route, leaf help
+should execute, and long docs should explain.
 
 References:
 
@@ -18,7 +19,19 @@ References:
 
 ## Discovery Levels
 
-Level 0:
+## Design Rules
+
+- Root help and `nestor guide commands` are selection surfaces. They should stay
+  compact and avoid long reference material.
+- Command group help is a routing surface. It should name valid subcommands,
+  one-line purposes, and the next 2-3 commands to try.
+- Leaf help is an execution surface. It should include required arguments,
+  defaults, examples, the endpoint, and a relevant docs link.
+- Deep guide pages are reference surfaces. They can include workflow bodies,
+  grammar rules, error recovery, and crosslinks.
+- Every deep page should say when to use it and where to go next.
+
+## Level 0: Entry Surface
 
 ```sh
 nestor --help
@@ -28,7 +41,7 @@ nestor guide commands
 
 Shows the command map, global options, and next drill-down commands.
 
-Level 1:
+## Level 1: Command Group Discovery
 
 ```sh
 nestor chunk
@@ -39,7 +52,7 @@ nestor rule
 Calling a command group without a subcommand prints valid subcommands, one-line
 purposes, and next actions.
 
-Level 2:
+## Level 2: Leaf Command Help
 
 ```sh
 nestor chunk put --help
@@ -50,7 +63,7 @@ nestor rule eval --help
 Leaf help includes purpose, endpoint, required args, defaults, examples, and
 links to relevant docs.
 
-Level 3:
+## Level 3: Deep Guides
 
 ```sh
 nestor guide slots

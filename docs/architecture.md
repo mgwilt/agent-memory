@@ -82,3 +82,74 @@ bundle through `NESTOR_MEMGRAPH_TLS_CA_FILE`.
 This deliberately avoids graph-only ACT-R scoring. The research reports identify
 dynamic activation math and deterministic tests as the reasons to keep scoring in
 Rust.
+
+## Memory System Flow
+
+The CLI and HTTP API share the same memory path. The CLI owns terminal
+interaction and output rendering, while the API owns request handling and calls
+the Rust memory modules.
+
+```mermaid
+flowchart TD
+  Agent["Agent or companion app"] --> CLI["nestor CLI"]
+  Agent --> HTTP["Nestor HTTP API"]
+  CLI --> Client["nestor-client<br/>typed transport"]
+  Client --> HTTP
+  HTTP --> Session["nestor-session<br/>buffers and per-agent state"]
+  HTTP --> Store["nestor-store<br/>candidate and persistence repository"]
+  Store --> Graph[("Memgraph<br/>chunks, slots, practice, associations")]
+  Store --> Core["nestor-core<br/>activation scoring"]
+  Session --> Core
+  HTTP --> Rules["nestor-rules<br/>production evaluation"]
+  Core --> HTTP
+  Rules --> HTTP
+  HTTP --> Result["Response<br/>memory, diagnostics, metrics"]
+  Result --> Agent
+```
+
+## Memory Scoring Flow
+
+Nestor uses Memgraph to keep candidate generation bounded and durable, then
+scores every candidate in Rust so retrieval remains deterministic, testable, and
+explainable.
+
+```mermaid
+flowchart TD
+  Request["Retrieve request<br/>agent, chunk type, cues, context, threshold"] --> Normalize["Normalize cues<br/>typed symbol, text, number, bool values"]
+  Normalize --> Candidates["Fetch bounded candidates<br/>indexed chunk type and cue slots"]
+  Candidates --> Hydrate["Hydrate scoring inputs<br/>practice events, associations, candidate slots"]
+  Hydrate --> Each{"For each candidate"}
+
+  subgraph Score["Activation scoring in nestor-core"]
+    Base["Base level<br/>B = ln(sum(weight * age^-d))"]
+    Spread["Spreading activation<br/>S = sum(source_weight * association_strength)"]
+    Partial["Partial match<br/>P = mismatch_penalty * similarity"]
+    Noise["Noise<br/>deterministic logistic perturbation when enabled"]
+    Total["Activation<br/>A = B + S + P + noise"]
+    Probability["Retrieval probability<br/>1 / (1 + exp((threshold - A) / s))"]
+    Latency["Predicted latency<br/>F * exp(-A)"]
+  end
+
+  Each --> Base
+  Each --> Spread
+  Each --> Partial
+  Each --> Noise
+  Base --> Total
+  Spread --> Total
+  Partial --> Total
+  Noise --> Total
+  Total --> Probability
+  Total --> Latency
+  Total --> Threshold{"A >= threshold?"}
+
+  Threshold -->|yes| Rank["Rank hit candidates<br/>activation desc, chunk id tie-break"]
+  Threshold -->|no| Miss["Miss diagnostics<br/>best activation and threshold"]
+  Rank --> Commit["Commit retrieval buffer<br/>record retrieval practice"]
+  Commit --> HitResponse["Hit response<br/>chunk, score components, probability, latency"]
+  Miss --> MissResponse["Miss response<br/>reason, diagnostics, candidate count"]
+```
+
+The response preserves the component breakdown as `base_level`, `spreading`,
+`partial_match`, `noise`, `activation`, `retrieval_probability`, and
+`predicted_latency_ms`. This makes CLI and API results mechanically checkable
+without requiring callers to infer why a memory was retrieved or missed.
