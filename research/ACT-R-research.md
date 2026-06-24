@@ -2,77 +2,77 @@
 
 ## Executive summary
 
-This handoff proposes an **ACT‑R–inspired declarative/procedural memory service** for LLM agents, implemented as a Rust service backed by Memgraph. The core recommendation is to model **chunks, buffer state, practice/retrieval events, associative links, and optional production rules** in Memgraph, while performing **exact activation computation and rule selection in Rust**. That split is the best engineering fit because ACT‑R activation depends on logarithms, power-law decay, noisy thresholds, associative spreading, and optional partial matching; Memgraph is excellent for indexed candidate generation, relationship traversal, persistence, and clustering, while Rust is a better execution environment for the numerical parts and API surface. Memgraph speaks Bolt/Cypher, supports composite indexes and uniqueness constraints, supports transactional storage with snapshot isolation by default, and can be used from Rust via its own Rust client guidance or a Bolt-compatible Rust driver such as `neo4rs`. citeturn19view3turn36view1turn5view1turn6view0turn6view2turn5view0turn32view2turn4search17
+This handoff proposes an **ACT‑R–inspired declarative/procedural memory service** for LLM agents, implemented as a Rust service backed by Memgraph. The core recommendation is to model **chunks, buffer state, practice/retrieval events, associative links, and optional production rules** in Memgraph, while performing **exact activation computation and rule selection in Rust**. That split is the best engineering fit because ACT‑R activation depends on logarithms, power-law decay, noisy thresholds, associative spreading, and optional partial matching; Memgraph is excellent for indexed candidate generation, relationship traversal, persistence, and clustering, while Rust is a better execution environment for the numerical parts and API surface. Memgraph speaks Bolt/Cypher, supports composite indexes and uniqueness constraints, supports transactional storage with snapshot isolation by default, and can be used from Rust via its own Rust client guidance or a Bolt-compatible Rust driver such as `neo4rs`. [^coala][^actr-integrated-theory][^memgraph-rust][^neo4rs]
 
-ACT‑R’s declarative memory can be operationalized as follows. A chunk’s activation is the sum of a **base-level term** and an **associative spreading term**:  
-\[
+ACT‑R’s declarative memory can be operationalized as follows. A chunk’s activation is the sum of a **base-level term** and an **associative spreading term**:
+$$
 A_i = B_i + \sum_j W_j S_{ji}
-\]
-with base-level learning  
-\[
+$$
+with base-level learning
+$$
 B_i = \ln\left(\sum_{k=1}^{n} t_k^{-d}\right)
-\]
-where \(t_k\) is time since each practice event and \(d\) is the decay parameter. Retrieval probability is logistic in relation to a threshold \(\tau\):  
-\[
+$$
+where $t_k$ is time since each practice event and $d$ is the decay parameter. Retrieval probability is logistic in relation to a threshold $\tau$:
+$$
 P(\text{retrieve } i) = \frac{1}{1 + e^{-(A_i-\tau)/s}}
-\]
-and retrieval latency is exponential in negative activation:  
-\[
+$$
+and retrieval latency is exponential in negative activation:
+$$
 T_i = F e^{-A_i}
-\]
-with an empirically constrained relationship around threshold \(F \approx 0.35 e^{\tau}\). Production utility is  
-\[
+$$
+with an empirically constrained relationship around threshold $F \approx 0.35 e^{\tau}$. Production utility is
+$$
 U_i = P_i G - C_i
-\]
-and production choice is softmax-like over utilities:  
-\[
+$$
+and production choice is softmax-like over utilities:
+$$
 P(\text{choose } i)=\frac{e^{U_i/t}}{\sum_j e^{U_j/t}}
-\]
-ACT‑R also assumes module buffers expose limited information to a central production system; each buffer holds a single chunk, only one production fires per cycle, and a cognitive cycle is commonly treated as about **50 ms**. citeturn19view3turn18view6turn18view7turn36view1turn19view5turn25view1turn25view3
+$$
+ACT‑R also assumes module buffers expose limited information to a central production system; each buffer holds a single chunk, only one production fires per cycle, and a cognitive cycle is commonly treated as about **50 ms**. [^actr-integrated-theory]
 
-For an LLM agent, this yields a concrete design: use Memgraph to store **episodic and semantic chunks**, **practice/retrieval histories**, **associations** used for spreading activation, and **current buffer snapshots** for explainability. Expose a Rust API for `write_memory`, `update_memory`, `retrieve_memory`, `rehearse`, `consolidate`, and `forget`. Retrieval should be **two-stage**: first, indexed candidate selection in Memgraph by agent, chunk type, slot filters, and recency; second, exact ACT‑R scoring in Rust. In production, maintain a **cached base-level activation** on the chunk for fast ranking, and recompute exactly from event history during retrieval or scheduled consolidation. This hybrid design preserves ACT‑R semantics without forcing all numeric logic into Cypher. That recommendation is an engineering inference grounded in the ACT‑R equations and Memgraph’s strengths in indexed property-graph traversal and transactional graph storage. citeturn19view3turn24view0turn5view1turn34view0turn12search12
+For an LLM agent, this yields a concrete design: use Memgraph to store **episodic and semantic chunks**, **practice/retrieval histories**, **associations** used for spreading activation, and **current buffer snapshots** for explainability. Expose a Rust API for `write_memory`, `update_memory`, `retrieve_memory`, `rehearse`, `consolidate`, and `forget`. Retrieval should be **two-stage**: first, indexed candidate selection in Memgraph by agent, chunk type, slot filters, and recency; second, exact ACT‑R scoring in Rust. In production, maintain a **cached base-level activation** on the chunk for fast ranking, and recompute exactly from event history during retrieval or scheduled consolidation. This hybrid design preserves ACT‑R semantics without forcing all numeric logic into Cypher. That recommendation is an engineering inference grounded in the ACT‑R equations and Memgraph’s strengths in indexed property-graph traversal and transactional graph storage. [^coala][^actr-integrated-theory][^memgraph-rust][^neo4rs]
 
 ## ACT‑R essentials translated into implementable memory semantics
 
-ACT‑R organizes cognition around **modules** that communicate through **buffers**, while a central **production system** selects one matching production at a time. The integrated ACT‑R account describes modules depositing chunks into buffers, the production system matching patterns over those buffers, one production firing per cycle, and each buffer holding only a single chunk at a time. In practice, for an LLM agent memory system, you usually do **not** need to reproduce the full cognitive architecture; you need to preserve the parts that affect retrieval and control. That means: represent chunks explicitly, represent buffer state explicitly, compute chunk activation from practice history and context, and implement production-rule selection over buffer summaries. citeturn25view1turn25view3
+ACT‑R organizes cognition around **modules** that communicate through **buffers**, while a central **production system** selects one matching production at a time. The integrated ACT‑R account describes modules depositing chunks into buffers, the production system matching patterns over those buffers, one production firing per cycle, and each buffer holding only a single chunk at a time. In practice, for an LLM agent memory system, you usually do **not** need to reproduce the full cognitive architecture; you need to preserve the parts that affect retrieval and control. That means: represent chunks explicitly, represent buffer state explicitly, compute chunk activation from practice history and context, and implement production-rule selection over buffer summaries. [^coala][^actr-integrated-theory]
 
-A **chunk** is the fundamental declarative unit. Engineering-wise, a chunk should have: a stable identifier; an owner or tenant; a chunk type; slot-value content; timestamps for creation and update; a practice history or compressed practice summary; protection flags; and optional provenance. ACT‑R’s formal retrieval model says chunk activation has a base-level term \(B_i\) and an associative term \(\sum_j W_jS_{ji}\). In the original integrated presentation, the attentional weights \(W_j\) are commonly set to \(1/n\) where \(n\) is the number of current sources, and associative strength can be approximated as \(S_{ji}=S-\ln(\text{fan}_j)\), where \(\text{fan}_j\) is the number of facts associated with cue \(j\). This is exactly why a graph database is attractive here: the **fan** of a cue is literally graph degree over a selected relationship family. citeturn19view3turn19view4
+A **chunk** is the fundamental declarative unit. Engineering-wise, a chunk should have: a stable identifier; an owner or tenant; a chunk type; slot-value content; timestamps for creation and update; a practice history or compressed practice summary; protection flags; and optional provenance. ACT‑R’s formal retrieval model says chunk activation has a base-level term $B_i$ and an associative term $\sum_j W_jS_{ji}$. In the original integrated presentation, the attentional weights $W_j$ are commonly set to $1/n$ where $n$ is the number of current sources, and associative strength can be approximated as $S_{ji}=S-\ln(\text{fan}_j)$, where $\text{fan}_j$ is the number of facts associated with cue $j$. This is exactly why a graph database is attractive here: the **fan** of a cue is literally graph degree over a selected relationship family. [^actr-integrated-theory][^memgraph-indexes]
 
-Base-level activation is the most important part to preserve faithfully. ACT‑R models practice and forgetting with  
-\[
+Base-level activation is the most important part to preserve faithfully. ACT‑R models practice and forgetting with
+$$
 B_i = \ln\left(\sum_{k=1}^{n} t_k^{-d}\right)
-\]
-which produces the familiar power-law sensitivity to frequency and recency. Anderson and Schooler’s work is the theoretical basis for this, showing that environmental recurrence patterns match power-law recency/frequency effects and motivating ACT‑R’s rational memory formulation. In a software implementation, every **encoding, successful retrieval, rehearsal, or explicit reinforcement** should be treated as a practice event unless you intentionally distinguish event types with different weights. A robust default is \(d = 0.5\), which ACT‑R literature and the ACT‑R community have often used as a default over many applications. citeturn19view3turn2search1
+$$
+which produces the familiar power-law sensitivity to frequency and recency. Anderson and Schooler’s work is the theoretical basis for this, showing that environmental recurrence patterns match power-law recency/frequency effects and motivating ACT‑R’s rational memory formulation. In a software implementation, every **encoding, successful retrieval, rehearsal, or explicit reinforcement** should be treated as a practice event unless you intentionally distinguish event types with different weights. A robust default is $d = 0.5$, which ACT‑R literature and the ACT‑R community have often used as a default over many applications. [^actr-integrated-theory][^actr-schooler]
 
-Retrieval converts activation into both **success probability** and **latency**. The ACT‑R formulation is  
-\[
+Retrieval converts activation into both **success probability** and **latency**. The ACT‑R formulation is
+$$
 P(\text{retrieve } i)=\frac{1}{1+e^{-(A_i-\tau)/s}}
-\]
-and  
-\[
+$$
+and
+$$
 T_i = F e^{-A_i}
-\]
-where \(s\) controls activation noise and \(\tau\) is the retrieval threshold. In engineering terms, \(\tau\) becomes your **minimum activation threshold** for inclusion in the retrieval result set; \(s\) becomes a stochastic exploration knob; and \(F\) becomes a latency calibration parameter if you want the memory system to simulate human-like time or simply expose an expected retrieval delay metric. If you do not need stochasticity in production, you can set noise to zero for deterministic ranking while still preserving the same activation formula. citeturn19view3turn18view6turn18view7
+$$
+where $s$ controls activation noise and $\tau$ is the retrieval threshold. In engineering terms, $\tau$ becomes your **minimum activation threshold** for inclusion in the retrieval result set; $s$ becomes a stochastic exploration knob; and $F$ becomes a latency calibration parameter if you want the memory system to simulate human-like time or simply expose an expected retrieval delay metric. If you do not need stochasticity in production, you can set noise to zero for deterministic ranking while still preserving the same activation formula. [^actr-integrated-theory]
 
-ACT‑R implementations also support **partial matching**, which is highly relevant to LLM agents because agent prompts frequently provide incomplete or approximate cues. The standard tutorial material expresses activation with additional terms for spreading activation, noise, and partial matching:  
-\[
+ACT‑R implementations also support **partial matching**, which is highly relevant to LLM agents because agent prompts frequently provide incomplete or approximate cues. The standard tutorial material expresses activation with additional terms for spreading activation, noise, and partial matching:
+$$
 A_i = B_i + \varepsilon_i + \sum_{k}\sum_j W_{kj}S_{ji} + \sum_l P M_{li}
-\]
-where \(P\) is the mismatch penalty weight and \(M_{li}\) is similarity between requested slot value \(l\) and the candidate chunk’s value for that slot. This is exactly the mechanism you want for “retrieve the most similar memory even if a slot is approximate.” In this system, treat exact symbolic slots as perfect-match / mismatch, and optionally add embedding-based similarity for free-text slots as a bounded value in \([MD, MS]\). That embedding integration is an engineering extension, not standard ACT‑R, but it maps cleanly to the mismatch term. citeturn24view0turn23search6
+$$
+where $P$ is the mismatch penalty weight and $M_{li}$ is similarity between requested slot value $l$ and the candidate chunk’s value for that slot. This is exactly the mechanism you want for “retrieve the most similar memory even if a slot is approximate.” In this system, treat exact symbolic slots as perfect-match / mismatch, and optionally add embedding-based similarity for free-text slots as a bounded value in $[MD, MS]$. That embedding integration is an engineering extension, not standard ACT‑R, but it maps cleanly to the mismatch term. [^actr-integrated-theory][^actr-outsider]
 
-Procedural memory uses **production rules**. The ACT‑R utility equation is  
-\[
+Procedural memory uses **production rules**. The ACT‑R utility equation is
+$$
 U_i=P_iG-C_i
-\]
-and the probability of selecting a matching production is  
-\[
+$$
+and the probability of selecting a matching production is
+$$
 P(\text{choose }i)=\frac{e^{U_i/t}}{\sum_j e^{U_j/t}}
-\]
-where \(G\) is current goal value, \(P_i\) is estimated probability of success, \(C_i\) is estimated cost, and \(t\) is utility noise. For an LLM agent, this is a natural fit for selecting among memory strategies, such as “retrieve exact episode,” “retrieve semantic summary,” “ask planner,” or “skip retrieval.” In the recommended design, store production rule metadata in Memgraph for observability and persistence, but execute rule matching and policy selection in Rust. citeturn36view1turn19view5
+$$
+where $G$ is current goal value, $P_i$ is estimated probability of success, $C_i$ is estimated cost, and $t$ is utility noise. For an LLM agent, this is a natural fit for selecting among memory strategies, such as “retrieve exact episode,” “retrieve semantic summary,” “ask planner,” or “skip retrieval.” In the recommended design, store production rule metadata in Memgraph for observability and persistence, but execute rule matching and policy selection in Rust. [^coala][^actr-integrated-theory][^memgraph-indexes]
 
 ## Memgraph graph model, schema, constraints, and Cypher
 
-Memgraph is a property graph database compatible with Bolt/Cypher. It does **not** create indexes automatically; it supports label indexes, label-property indexes, composite indexes, descending indexes, uniqueness constraints, existence constraints, and data-type constraints. It also supports runtime schema tracking via `SHOW SCHEMA INFO` when `--schema-info-enabled=true`, which is useful for validation and diagnostics in a memory platform. citeturn5view1turn6view0turn6view1turn34view0
+Memgraph is a property graph database compatible with Bolt/Cypher. It does **not** create indexes automatically; it supports label indexes, label-property indexes, composite indexes, descending indexes, uniqueness constraints, existence constraints, and data-type constraints. It also supports runtime schema tracking via `SHOW SCHEMA INFO` when `--schema-info-enabled=true`, which is useful for validation and diagnostics in a memory platform. [^memgraph-indexes][^memgraph-constraints]
 
 ### Recommended conceptual mapping
 
@@ -90,7 +90,7 @@ The recommended model is **hybrid symbolic graph + event graph**.
 | Agent / tenant | `(:Agent)` node | Isolation and multi-agent ownership |
 | Episode / provenance | `(:Episode)` or `(:Source)` node | Groups writes and supports auditability |
 
-This design is an engineering recommendation. It is not a literal ACT‑R software clone; it is a faithful operationalization of ACT‑R retrieval semantics on a property graph. The key design choice is to store **practice history as append-only event nodes**, not as a mutable timestamp list on the chunk. Under Memgraph’s snapshot isolation, concurrent updates to the same graph object can conflict; append-only events reduce write contention compared with repeatedly rewriting the same chunk node. citeturn6view2turn32view2
+This design is an engineering recommendation. It is not a literal ACT‑R software clone; it is a faithful operationalization of ACT‑R retrieval semantics on a property graph. The key design choice is to store **practice history as append-only event nodes**, not as a mutable timestamp list on the chunk. Under Memgraph’s snapshot isolation, concurrent updates to the same graph object can conflict; append-only events reduce write contention compared with repeatedly rewriting the same chunk node. [^memgraph-transactions]
 
 ### Canonical schema
 
@@ -105,7 +105,7 @@ This design is an engineering recommendation. It is not a literal ACT‑R softwa
 | `:CURRENT` | `set_at` | none | Only one outgoing current edge per buffer, controlled in tx |
 | `:HAS_EVENT` | none | none | Simpler than inverse traversal if chunk-centric |
 
-The constraint and index choices above are supported by Memgraph’s schema features: composite label-property indexes, descending indexes, uniqueness constraints over one or more properties, existence constraints, and type constraints. Memgraph also documents that constraints do **not** automatically create indexes, so create both explicitly. citeturn5view1turn6view0turn6view1turn27search0
+The constraint and index choices above are supported by Memgraph’s schema features: composite label-property indexes, descending indexes, uniqueness constraints over one or more properties, existence constraints, and type constraints. Memgraph also documents that constraints do **not** automatically create indexes, so create both explicitly. [^memgraph-indexes][^memgraph-constraints]
 
 ### DDL and migration bootstrap
 
@@ -130,7 +130,7 @@ CREATE INDEX ON :Chunk(slots.topic);
 CREATE INDEX ON :Chunk(slots.entity);
 ```
 
-Memgraph supports these index and constraint families, including nested map-property indexes and descending indexes. For schema deployment, `schema.assert()` exists, but Memgraph documents that it is incomplete for some newer index families and that `DROP ALL CONSTRAINTS` / `DROP ALL INDEXES` are now preferred for full resets. Therefore, for this project, use **ordered `.cypher` migration files** applied by the Rust service rather than relying on a SQL migration tool such as `refinery`, which officially targets Postgres, MySQL, and SQLite rather than Bolt/Cypher backends. citeturn5view1turn34view1turn26search10turn31search0turn31search6
+Memgraph supports these index and constraint families, including nested map-property indexes and descending indexes. For schema deployment, `schema.assert()` exists, but Memgraph documents that it is incomplete for some newer index families and that `DROP ALL CONSTRAINTS` / `DROP ALL INDEXES` are now preferred for full resets. Therefore, for this project, use **ordered `.cypher` migration files** applied by the Rust service rather than relying on a SQL migration tool such as `refinery`, which officially targets Postgres, MySQL, and SQLite rather than Bolt/Cypher backends. [^memgraph-indexes][^memgraph-constraints][^refinery]
 
 ### CRUD and retrieval Cypher
 
@@ -244,11 +244,11 @@ RETURN c, collect({ts: e.ts, kind: e.kind, weight: e.weight}) AS practice_events
 LIMIT $candidate_limit;
 ```
 
-The design intent is to let Memgraph do **candidate selection** and neighborhood expansion, while Rust computes exact ACT‑R activation and then writes back `base_level_cache`, `last_activation`, and `activation_updated_at` as a maintenance optimization. citeturn5view1turn34view0turn36view1
+The design intent is to let Memgraph do **candidate selection** and neighborhood expansion, while Rust computes exact ACT‑R activation and then writes back `base_level_cache`, `last_activation`, and `activation_updated_at` as a maintenance optimization. [^actr-integrated-theory][^memgraph-indexes]
 
 ## Rust service architecture and LLM integration API
 
-The Rust stack should be intentionally conservative: `tokio` for async runtime, `axum` for HTTP API and SSE / WebSockets, `serde` and `serde_json` for serialization, `thiserror` for typed domain errors, `tower-http` plus `tracing` / `tracing-subscriber` for observability, `neo4rs` as the primary async Bolt driver, and `testcontainers` + `criterion` for integration and performance testing. Tokio provides the async runtime foundation; axum integrates with Tokio and exposes SSE/WebSocket support via crate features; Serde provides efficient trait-based serialization; `thiserror` reduces boilerplate for typed errors; `tower-http::trace` supplies request tracing middleware; `neo4rs` exposes connection pooling and transactions in async Rust; and `testcontainers` / `criterion` are the standard choices for containerized integration tests and statistically rigorous microbenchmarks. citeturn9search0turn9search3turn29view0turn30search3turn30search1turn9search2turn9search22turn30search10turn32view0turn33view2turn11search0turn11search1
+The Rust stack should be intentionally conservative: `tokio` for async runtime, `axum` for HTTP API and SSE / WebSockets, `serde` and `serde_json` for serialization, `thiserror` for typed domain errors, `tower-http` plus `tracing` / `tracing-subscriber` for observability, `neo4rs` as the primary async Bolt driver, and `testcontainers` + `criterion` for integration and performance testing. Tokio provides the async runtime foundation; axum integrates with Tokio and exposes SSE/WebSocket support via crate features; Serde provides efficient trait-based serialization; `thiserror` reduces boilerplate for typed errors; `tower-http::trace` supplies request tracing middleware; `neo4rs` exposes connection pooling and transactions in async Rust; and `testcontainers` / `criterion` are the standard choices for containerized integration tests and statistically rigorous microbenchmarks. [^rust-crates][^neo4rs][^testcontainers][^criterion]
 
 ### Recommended crate layout
 
@@ -298,7 +298,7 @@ sequenceDiagram
 
 ### Storage and transaction guidance
 
-Use `neo4rs::Graph` as the default store abstraction. Its docs state that `Graph::run` / `Graph::execute` borrow a connection from an internal pool and return it immediately, while explicit transactions reuse the same connection until commit/rollback and drop. The config builder exposes `max_connections`, with a documented default of 16. That is a good default for a single-node service, but for high-throughput memory writes, start with a tuned pool size per replica and validate using contention and latency measurements. citeturn32view0
+Use `neo4rs::Graph` as the default store abstraction. Its docs state that `Graph::run` / `Graph::execute` borrow a connection from an internal pool and return it immediately, while explicit transactions reuse the same connection until commit/rollback and drop. The config builder exposes `max_connections`, with a documented default of 16. That is a good default for a single-node service, but for high-throughput memory writes, start with a tuned pool size per replica and validate using contention and latency measurements. [^neo4rs]
 
 Use these transaction patterns:
 
@@ -311,7 +311,7 @@ Use these transaction patterns:
 | Retrieval | auto-commit read tx; optional separate async cache writeback |
 | Forget batch | paginated explicit transactions |
 
-For error handling, prefer a domain error enum such as `MemoryError` with variants for validation, not found, conflict, threshold miss, driver error, and serialization error; implement it with `thiserror`; convert to HTTP problem details in the API crate. Use `tracing` spans around every request and Memgraph query; enrich spans with `agent_id`, `chunk_id`, `buffer_name`, query class, and transaction id if available. Memgraph also supports transaction metadata visibility through `SHOW TRANSACTIONS`, which is useful if the driver can attach metadata. citeturn9search2turn30search10turn5view3
+For error handling, prefer a domain error enum such as `MemoryError` with variants for validation, not found, conflict, threshold miss, driver error, and serialization error; implement it with `thiserror`; convert to HTTP problem details in the API crate. Use `tracing` spans around every request and Memgraph query; enrich spans with `agent_id`, `chunk_id`, `buffer_name`, query class, and transaction id if available. Memgraph also supports transaction metadata visibility through `SHOW TRANSACTIONS`, which is useful if the driver can attach metadata. [^rust-crates][^memgraph-transactions]
 
 ### API surface for LLM agents
 
@@ -378,7 +378,7 @@ Suggested retrieve response:
 }
 ```
 
-The streaming endpoint should emit candidate batches or retrieval phases over SSE: `candidate_batch`, `scored_candidate`, `ranked_result`, `done`. Axum supports SSE and WebSockets behind feature flags and is a good fit for this interface style. citeturn29view0turn9search3
+The streaming endpoint should emit candidate batches or retrieval phases over SSE: `candidate_batch`, `scored_candidate`, `ranked_result`, `done`. Axum supports SSE and WebSockets behind feature flags and is a good fit for this interface style. [^rust-crates]
 
 ### Example Rust code snippets
 
@@ -502,7 +502,7 @@ pub async fn fetch_candidates(
 }
 ```
 
-The driver and crate choices above are consistent with the documented Rust ecosystem pieces and Memgraph’s own Rust guidance. Memgraph explicitly says its Rust guide is based on `rsmgclient` and that Bolt-compatible Neo4j drivers can be used because Memgraph is compatible with them; `neo4rs` documents async transactions, connection pooling, and configurable pool size. citeturn5view0turn32view0turn33view2
+The driver and crate choices above are consistent with the documented Rust ecosystem pieces and Memgraph’s own Rust guidance. Memgraph explicitly says its Rust guide is based on `rsmgclient` and that Bolt-compatible Neo4j drivers can be used because Memgraph is compatible with them; `neo4rs` documents async transactions, connection pooling, and configurable pool size. [^memgraph-rust][^neo4rs]
 
 ## Algorithms for activation, rehearsal, consolidation, and forgetting
 
@@ -538,8 +538,8 @@ function score_chunk(chunk, events, context_cues, params, now):
     return activation, retrieval_probability, expected_latency
 ```
 
-**Complexity:**  
-For a single chunk, exact scoring is \(O(m + c + q)\), where \(m\) is practice-event count, \(c\) is number of context cues, and \(q\) is number of requested slots entering partial matching. For \(N\) candidates, complexity is \(O(\sum m_i + N(c+q))\). This is why the service should use **candidate pruning** in Memgraph first. The formulas themselves are directly derived from ACT‑R sources. citeturn19view3turn24view0
+**Complexity:**
+For a single chunk, exact scoring is $O(m + c + q)$, where $m$ is practice-event count, $c$ is number of context cues, and $q$ is number of requested slots entering partial matching. For $N$ candidates, complexity is $O(\sum m_i + N(c+q))$. This is why the service should use **candidate pruning** in Memgraph first. The formulas themselves are directly derived from ACT‑R sources. [^actr-integrated-theory][^actr-outsider][^memgraph-indexes]
 
 ### Rehearsal and cache maintenance
 
@@ -555,9 +555,9 @@ function rehearse(chunk_id, event_kind, now):
       recompute base_level_cache for chunk_id
 ```
 
-**Complexity:** \(O(1)\) in the write path if exact cache recomputation is deferred; \(O(m)\) if recomputed immediately from all events.
+**Complexity:** $O(1)$ in the write path if exact cache recomputation is deferred; $O(m)$ if recomputed immediately from all events.
 
-**Recommendation:** keep the write path short and append-only, then refresh `base_level_cache` asynchronously during low latency budgets or batch windows. This is a pragmatic adaptation to Memgraph transaction contention and the cost of exact recomputation. citeturn6view2turn32view2
+**Recommendation:** keep the write path short and append-only, then refresh `base_level_cache` asynchronously during low latency budgets or batch windows. This is a pragmatic adaptation to Memgraph transaction contention and the cost of exact recomputation. [^memgraph-transactions]
 
 ### Consolidation
 
@@ -574,7 +574,7 @@ function consolidate(agent_id, chunk_type, window):
         mark sources consolidated=true
 ```
 
-**Complexity:** with bucketing by `semantic_hash` or `(entity, topic)` prefix, near \(O(n \log n)\) for grouping; without bucketing, all-pairs similarity can degrade to \(O(n^2)\). Use coarse bucketing first.
+**Complexity:** with bucketing by `semantic_hash` or `(entity, topic)` prefix, near $O(n \log n)$ for grouping; without bucketing, all-pairs similarity can degrade to $O(n^2)$. Use coarse bucketing first.
 
 ### Forgetting
 
@@ -591,9 +591,9 @@ function forget(agent_id, now, policy):
             archive(chunk)
 ```
 
-**Complexity:** \(O(k)\) over filtered candidates if indexed by `last_practiced_at`, `base_level_cache`, and `active`.
+**Complexity:** $O(k)$ over filtered candidates if indexed by `last_practiced_at`, `base_level_cache`, and `active`.
 
-A safe production rule is: first **soft-delete**, then **purge archived chunks** after a retention window. Because Memgraph stores durability via snapshots and WAL, retention and purge need to be aligned with backup policy rather than assumed to disappear immediately from physical media. citeturn13view1turn7search9
+A safe production rule is: first **soft-delete**, then **purge archived chunks** after a retention window. Because Memgraph stores durability via snapshots and WAL, retention and purge need to be aligned with backup policy rather than assumed to disappear immediately from physical media. [^memgraph-durability]
 
 ### Production-rule selection
 
@@ -610,30 +610,30 @@ function choose_production(matching_rules, goal_value, noise_t):
     return sample_softmax(scores, temperature=noise_t)
 ```
 
-**Complexity:** \(O(r)\) for \(r\) matching rules.
+**Complexity:** $O(r)$ for $r$ matching rules.
 
-This directly mirrors ACT‑R’s utility and production choice equations and is appropriate for routing among retrieval plans, summarization decisions, or tool-use policies. citeturn36view1turn19view5
+This directly mirrors ACT‑R’s utility and production choice equations and is appropriate for routing among retrieval plans, summarization decisions, or tool-use policies. [^actr-integrated-theory]
 
 ## Concurrency, consistency, scaling, security, and operations
 
-Memgraph’s default transactional mode is `IN_MEMORY_TRANSACTIONAL`; default isolation is `SNAPSHOT_ISOLATION`, which guarantees a consistent snapshot for reads and aborts conflicting concurrent updates on the same graph objects. That is good for memory workloads, but it means you should avoid hot-node rewrite patterns. Therefore: prefer **append-only practice events**, use **optimistic version fields** on chunks, and add **bounded retry with jitter** for `409 Conflict` / transaction-conflict failures. For purely read-only analytics, `READ COMMITTED` can reduce some contention tradeoffs, but the recommended default for this memory service is to stay with snapshot isolation and explicit retries. citeturn6view2turn6view3
+Memgraph’s default transactional mode is `IN_MEMORY_TRANSACTIONAL`; default isolation is `SNAPSHOT_ISOLATION`, which guarantees a consistent snapshot for reads and aborts conflicting concurrent updates on the same graph objects. That is good for memory workloads, but it means you should avoid hot-node rewrite patterns. Therefore: prefer **append-only practice events**, use **optimistic version fields** on chunks, and add **bounded retry with jitter** for `409 Conflict` / transaction-conflict failures. For purely read-only analytics, `READ COMMITTED` can reduce some contention tradeoffs, but the recommended default for this memory service is to stay with snapshot isolation and explicit retries. [^memgraph-transactions]
 
-For clustering, distinguish **Community replication** from **Enterprise high availability**. Memgraph’s HA architecture uses coordinators managed with Raft; a typical HA cluster is **3 coordinators plus 3 data instances** (1 MAIN + 2 REPLICAs), while the minimum valid HA setup is **3 coordinators plus 2 data instances**. Writes go only to MAIN; read scaling is achieved by adding REPLICAs; write scaling is primarily vertical on MAIN rather than horizontal sharding. Querying the cluster in HA uses `neo4j://` Bolt+routing through coordinators, which returns routing tables with reader/writer/router roles and a documented TTL of 5 minutes. citeturn14search2turn35view1turn35view2
+For clustering, distinguish **Community replication** from **Enterprise high availability**. Memgraph’s HA architecture uses coordinators managed with Raft; a typical HA cluster is **3 coordinators plus 3 data instances** (1 MAIN + 2 REPLICAs), while the minimum valid HA setup is **3 coordinators plus 2 data instances**. Writes go only to MAIN; read scaling is achieved by adding REPLICAs; write scaling is primarily vertical on MAIN rather than horizontal sharding. Querying the cluster in HA uses `neo4j://` Bolt+routing through coordinators, which returns routing tables with reader/writer/router roles and a documented TTL of 5 minutes. [^memgraph-indexes][^memgraph-auth][^memgraph-roles][^memgraph-replication]
 
-That has two architectural consequences. First, if you choose `neo4rs`, treat routing support as an item requiring explicit verification in your compatibility matrix, because `neo4rs` documents routing support behind an unstable feature and notes incomplete Bolt feature coverage. Second, if HA routing compatibility is uncertain for your chosen driver version, the simplest fallback is an **application-side topology adapter**: route writes to MAIN, route reads to REPLICAs, and refresh topology from a coordinator-side health source. This is an engineering mitigation based on the documented state of `neo4rs` and Memgraph’s client-side routing model. citeturn33view2turn35view2
+That has two architectural consequences. First, if you choose `neo4rs`, treat routing support as an item requiring explicit verification in your compatibility matrix, because `neo4rs` documents routing support behind an unstable feature and notes incomplete Bolt feature coverage. Second, if HA routing compatibility is uncertain for your chosen driver version, the simplest fallback is an **application-side topology adapter**: route writes to MAIN, route reads to REPLICAs, and refresh topology from a coordinator-side health source. This is an engineering mitigation based on the documented state of `neo4rs` and Memgraph’s client-side routing model. [^memgraph-indexes][^memgraph-replication][^memgraph-rust][^neo4rs]
 
 For privacy and security, use the following baseline:
 
 | Concern | Recommendation | Basis |
 |---|---|---|
-| Transport encryption | Enable Bolt TLS with `--bolt-cert-file` and `--bolt-key-file` | Memgraph documents SSL/TLS for encrypted Bolt connections citeturn13view2 |
-| Authentication | Use named users; in Enterprise use roles and database-specific roles for tenant isolation | Memgraph documents auth, roles, and multi-tenant role assignment citeturn13view3turn8search2 |
-| Tenant isolation | Prefer one database per tenant for Enterprise multi-tenancy or strict `agent_id` scoping in Community | Memgraph recommends treating the default `memgraph` DB as admin/system and storing app data elsewhere in multi-tenant setups citeturn13view3 |
+| Transport encryption | Enable Bolt TLS with `--bolt-cert-file` and `--bolt-key-file` | Memgraph documents SSL/TLS for encrypted Bolt connections [^memgraph-indexes][^memgraph-ssl] |
+| Authentication | Use named users; in Enterprise use roles and database-specific roles for tenant isolation | Memgraph documents auth, roles, and multi-tenant role assignment [^memgraph-indexes][^memgraph-transactions][^memgraph-auth][^memgraph-roles] |
+| Tenant isolation | Prefer one database per tenant for Enterprise multi-tenancy or strict `agent_id` scoping in Community | Memgraph recommends treating the default `memgraph` DB as admin/system and storing app data elsewhere in multi-tenant setups [^memgraph-indexes][^memgraph-transactions][^memgraph-auth][^memgraph-roles] |
 | Secrets | Keep DB credentials and API keys in secret manager; use `secrecy`-style handling in Rust | Engineering best practice |
 | Sensitive slot values | Optional application-side field encryption or redaction before persistence | Engineering recommendation; Memgraph docs cover transport/auth, not full application-level field secrecy |
-| Retention | Align soft delete, purge windows, snapshots, and WAL retention with policy | Memgraph durability is snapshot + WAL based citeturn13view1turn7search9 |
+| Retention | Align soft delete, purge windows, snapshots, and WAL retention with policy | Memgraph durability is snapshot + WAL based [^memgraph-indexes][^memgraph-durability] |
 
-Operationally, enable monitoring early. Memgraph exposes metrics for vertex/edge count, memory usage, disk usage, index counts, transaction counters, query latency histograms, sessions, and HA status; OpenMetrics can be scraped directly, and Memgraph also supports session trace in logs for detailed per-session query profiling. These are the right primitives for a memory service dashboard. citeturn13view0
+Operationally, enable monitoring early. Memgraph exposes metrics for vertex/edge count, memory usage, disk usage, index counts, transaction counters, query latency histograms, sessions, and HA status; OpenMetrics can be scraped directly, and Memgraph also supports session trace in logs for detailed per-session query profiling. These are the right primitives for a memory service dashboard. [^memgraph-monitoring][^memgraph-transactions]
 
 Recommended monitoring set:
 
@@ -644,13 +644,13 @@ Recommended monitoring set:
 | `memory_activation_compute_ms` | Numerical scoring cost |
 | `memory_write_conflicts_total` | Snapshot-isolation contention |
 | `memory_rehearsal_events_total` | Growth / hot-agent patterns |
-| `memgraph_vertex_count`, `memgraph_edge_count` | Dataset growth citeturn13view0 |
-| `memgraph_memory_res_bytes`, `memgraph_disk_usage_bytes` | Capacity pressure citeturn13view0 |
-| `memgraph_query_execution_latency_seconds` | DB-side latency citeturn13view0 |
-| `memgraph_rolled_back_transactions_total` | Contention / failure rates citeturn13view0 |
-| `memgraph_instance_is_alive`, `memgraph_instance_is_main` | HA health in Enterprise citeturn13view0 |
+| `memgraph_vertex_count`, `memgraph_edge_count` | Dataset growth [^memgraph-indexes] |
+| `memgraph_memory_res_bytes`, `memgraph_disk_usage_bytes` | Capacity pressure [^memgraph-indexes] |
+| `memgraph_query_execution_latency_seconds` | DB-side latency [^memgraph-monitoring] |
+| `memgraph_rolled_back_transactions_total` | Contention / failure rates [^memgraph-indexes][^memgraph-transactions] |
+| `memgraph_instance_is_alive`, `memgraph_instance_is_main` | HA health in Enterprise [^memgraph-indexes][^memgraph-replication] |
 
-For durability, keep WAL enabled, keep periodic snapshots enabled, and back up via `CREATE SNAPSHOT` plus persistent volumes or managed backup workflows. Memgraph explicitly requires snapshots when WAL is enabled and retains WAL files only after the latest snapshot boundary. citeturn13view1turn7search9
+For durability, keep WAL enabled, keep periodic snapshots enabled, and back up via `CREATE SNAPSHOT` plus persistent volumes or managed backup workflows. Memgraph explicitly requires snapshots when WAL is enabled and retains WAL files only after the latest snapshot boundary. [^memgraph-indexes][^memgraph-durability]
 
 ## Delivery plan, tests, benchmarks, and implementation handoff
 
@@ -689,7 +689,7 @@ The user asked for estimated effort without an externally specified team size, s
 | Snapshot and restart recovery | Integration | Persisted graph recovers correctly |
 | HA read/write routing | Integration | Writes reach MAIN, reads succeed after failover |
 
-Use `testcontainers` with a `memgraph/memgraph` image for CI integration tests. Testcontainers for Rust is explicitly built for throwaway dependency containers in tests; Memgraph’s Docker-first developer workflow aligns well with that. citeturn11search0turn11search6turn5view0
+Use `testcontainers` with a `memgraph/memgraph` image for CI integration tests. Testcontainers for Rust is explicitly built for throwaway dependency containers in tests; Memgraph’s Docker-first developer workflow aligns well with that. [^memgraph-rust][^testcontainers]
 
 ### CI/CD outline
 
@@ -706,7 +706,7 @@ A practical pipeline:
 9. synthetic retrieval tests and conflict tests
 10. promote to production
 
-Criterion is designed for statistics-driven benchmarking and regression detection; use it for the activation engine and repository hot paths. citeturn11search1turn11search5
+Criterion is designed for statistics-driven benchmarking and regression detection; use it for the activation engine and repository hot paths. [^rust-crates][^criterion]
 
 ### Interfaces to hand to a coding agent
 
@@ -739,10 +739,32 @@ pub trait MaintenanceJobs {
 
 A few design questions remain implementation-sensitive rather than theory-sensitive.
 
-First, **driver choice for HA** should be validated in your exact environment. Memgraph’s HA routing model is clear, and `neo4rs` documents routing support behind an unstable feature; if HA is mandatory on day one, treat this as a compatibility checkpoint, not an assumption. citeturn35view2turn33view2
+First, **driver choice for HA** should be validated in your exact environment. Memgraph’s HA routing model is clear, and `neo4rs` documents routing support behind an unstable feature; if HA is mandatory on day one, treat this as a compatibility checkpoint, not an assumption. [^memgraph-indexes][^memgraph-replication][^memgraph-rust][^neo4rs]
 
 Second, there is a tradeoff between **exact event-history scoring** and **cached activation scoring**. Exact ACT‑R scoring is theoretically cleaner; cached scoring is operationally faster. The recommended compromise is **indexed candidate fetch + exact Rust re-rank + async cache writeback**.
 
 Third, this handoff assumes **no specific LLM** and therefore keeps episodic/semantic chunk content model-agnostic. If your target LLM has strict tool-calling or token-budget behavior, you may want a second pass that tunes the retrieval API and consolidation heuristics for that model family.
 
-The primary sources used here are the original ACT‑R literature and manuals, Memgraph documentation, and Rust crate documentation for the recommended implementation stack. citeturn19view3turn36view1turn17view2turn2search1turn5view0turn5view1turn6view0turn34view0turn13view0turn13view1turn13view2turn13view3turn35view2turn9search0turn9search3turn30search3turn32view0
+The primary sources used here are the original ACT‑R literature and manuals, Memgraph documentation, and Rust crate documentation for the recommended implementation stack. [^actr-integrated-theory][^actr-outsider][^memgraph-indexes][^rust-crates]
+
+## References
+
+[^coala]: Theodore R. Sumers, Shunyu Yao, Karthik Narasimhan, and Thomas L. Griffiths, [Cognitive Architectures for Language Agents](https://arxiv.org/abs/2309.02427), arXiv:2309.02427, 2023.
+[^actr-integrated-theory]: John R. Anderson, Daniel Bothell, Michael D. Byrne, Scott Douglass, Christian Lebiere, and Yulin Qin, [An Integrated Theory of the Mind](https://doi.org/10.1037/0033-295X.111.4.1036), Psychological Review 111(4), 2004.
+[^actr-schooler]: John R. Anderson and Lael J. Schooler, [Reflections of the Environment in Memory](https://doi.org/10.1037/0033-295X.98.3.396), Psychological Review 98(3), 1991.
+[^actr-outsider]: Jacob Whitehill, [Understanding ACT-R: An Outsider's Perspective](https://arxiv.org/abs/1306.0125), arXiv:1306.0125, 2013.
+[^memgraph-indexes]: Memgraph Docs, [Indexes](https://memgraph.com/docs/fundamentals/indexes).
+[^memgraph-constraints]: Memgraph Docs, [Constraints](https://memgraph.com/docs/fundamentals/constraints).
+[^memgraph-transactions]: Memgraph Docs, [Transactions](https://memgraph.com/docs/fundamentals/transactions).
+[^memgraph-durability]: Memgraph Docs, [Data durability](https://memgraph.com/docs/fundamentals/data-durability).
+[^memgraph-monitoring]: Memgraph Docs, [Monitoring](https://memgraph.com/docs/database-management/monitoring).
+[^memgraph-ssl]: Memgraph Docs, [SSL encryption](https://memgraph.com/docs/database-management/ssl-encryption).
+[^memgraph-auth]: Memgraph Docs, [Authentication and authorization](https://memgraph.com/docs/database-management/authentication-and-authorization).
+[^memgraph-roles]: Memgraph Docs, [Multi-role users and multi-tenant roles](https://memgraph.com/docs/database-management/authentication-and-authorization/multiple-roles).
+[^memgraph-replication]: Memgraph Docs, [Replication](https://memgraph.com/docs/clustering/replication).
+[^memgraph-rust]: Memgraph Docs, [Rust quick start](https://memgraph.com/docs/client-libraries/rust).
+[^neo4rs]: [neo4rs crate documentation](https://docs.rs/neo4rs/latest/neo4rs/).
+[^refinery]: [refinery crate documentation](https://docs.rs/refinery/latest/refinery/).
+[^rust-crates]: Official crate documentation for [Tokio](https://docs.rs/tokio/latest/tokio/), [Axum](https://docs.rs/axum/latest/axum/), [Serde](https://docs.rs/serde/latest/serde/), [thiserror](https://docs.rs/thiserror/latest/thiserror/), [tower-http](https://docs.rs/tower-http/latest/tower_http/), and [tracing](https://docs.rs/tracing/latest/tracing/).
+[^testcontainers]: [testcontainers crate documentation](https://docs.rs/testcontainers/latest/testcontainers/).
+[^criterion]: [Criterion.rs documentation](https://bheisler.github.io/criterion.rs/book/index.html).
