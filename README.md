@@ -5,10 +5,6 @@ local service, or companion app. The primary interface is the `nestor` CLI:
 agents can write facts, retrieve relevant memories, reinforce useful memories,
 connect context, inspect diagnostics, and evaluate simple production rules.
 
-Nestor is inspired by ACT-R memory methodology, but the product surface is
-Nestor: the CLI, API, runtime configuration, metrics, and docs all use the
-Nestor name.
-
 ## What You Can Do
 
 - Store typed memories as chunks with slots.
