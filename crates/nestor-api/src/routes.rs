@@ -311,24 +311,22 @@ async fn retrieve_memory(
         &state,
         retrieve_chunk_outcome(state.repository.as_ref(), retrieval).await,
     )?;
-    if commit_on_hit {
-        if let Some(hit) = outcome.hit.as_ref() {
-            let observed = track_memory_result(
-                &state,
-                state
-                    .sessions
-                    .with_session_observed(agent_id_for_session, |session| {
-                        session.commit_retrieval(
-                            hit.chunk.chunk_id.clone(),
-                            hit.chunk.chunk_type.clone(),
-                            req.now_ms,
-                        );
-                        Ok(())
-                    }),
-            )?;
-            if observed.contended {
-                state.counters.record_session_lock_contention();
-            }
+    if commit_on_hit && let Some(hit) = outcome.hit.as_ref() {
+        let observed = track_memory_result(
+            &state,
+            state
+                .sessions
+                .with_session_observed(agent_id_for_session, |session| {
+                    session.commit_retrieval(
+                        hit.chunk.chunk_id.clone(),
+                        hit.chunk.chunk_type.clone(),
+                        req.now_ms,
+                    );
+                    Ok(())
+                }),
+        )?;
+        if observed.contended {
+            state.counters.record_session_lock_contention();
         }
     }
     state.counters.record_retrieval_observation(

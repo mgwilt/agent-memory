@@ -1,5 +1,4 @@
-FROM rust:1.85-bookworm AS build
-ENV RUSTUP_TOOLCHAIN=1.85.0
+FROM rust:bookworm AS build
 WORKDIR /app
 COPY . .
 RUN cargo build --release --locked -p nestor-api

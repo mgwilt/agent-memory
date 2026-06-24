@@ -198,14 +198,12 @@ pub async fn retrieve_chunk<R: MemoryRepository + ?Sized>(
     let commit_on_hit = request.commit_on_hit;
     let commit_at_ms = request.now_ms;
     let outcome = retrieve_chunk_outcome(repository, request).await?;
-    if commit_on_hit {
-        if let Some(hit) = outcome.hit.as_ref() {
-            session.commit_retrieval(
-                hit.chunk.chunk_id.clone(),
-                hit.chunk.chunk_type.clone(),
-                commit_at_ms,
-            );
-        }
+    if commit_on_hit && let Some(hit) = outcome.hit.as_ref() {
+        session.commit_retrieval(
+            hit.chunk.chunk_id.clone(),
+            hit.chunk.chunk_type.clone(),
+            commit_at_ms,
+        );
     }
     Ok(outcome)
 }
