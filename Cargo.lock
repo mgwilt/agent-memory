@@ -19,6 +19,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "actr-cli"
+version = "0.1.0"
+dependencies = [
+ "actr-api",
+ "actr-client",
+ "actr-ops",
+ "axum",
+ "clap",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "actr-client"
+version = "0.1.0"
+dependencies = [
+ "actr-api",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "actr-core"
 version = "0.1.0"
 

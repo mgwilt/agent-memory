@@ -65,6 +65,17 @@ Print the API route manifest:
 cargo run -p actr-api -- manifest
 ```
 
+Use the agent-friendly Rust CLI:
+
+```sh
+cargo run -p actr-cli -- guide
+cargo run -p actr-cli -- doctor
+cargo run -p actr-cli -- guide workflow
+```
+
+CLI architecture, command reference, workflows, and progressive-disclosure
+guidance live in [`docs/cli/README.md`](docs/cli/README.md).
+
 Start the local Axum API with the in-memory repository used by the current
 service wiring:
 
