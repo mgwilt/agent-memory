@@ -76,8 +76,9 @@ bundle through `NESTOR_MEMGRAPH_TLS_CA_FILE`.
 2. Fetch a bounded candidate set from Memgraph using indexed labels/properties.
 3. Hydrate practice history and association summaries.
 4. Compute activation in Rust.
-5. Threshold, tie-break, and commit the retrieval buffer.
-6. Record a practice event and optional audit data transactionally.
+5. Threshold and tie-break ranked candidates.
+6. Commit the retrieval buffer on a hit when requested, then return hit or miss
+   diagnostics.
 
 This deliberately avoids graph-only ACT-R scoring. The research reports identify
 dynamic activation math and deterministic tests as the reasons to keep scoring in
@@ -107,7 +108,7 @@ flowchart TD
   Result --> Agent
 ```
 
-## Memory Scoring Flow
+## Retrieval Scoring Internals
 
 Nestor uses Memgraph to keep candidate generation bounded and durable, then
 scores every candidate in Rust so retrieval remains deterministic, testable, and
@@ -115,38 +116,60 @@ explainable.
 
 ```mermaid
 flowchart TD
-  Request["Retrieve request<br/>agent, chunk type, cues, context, threshold"] --> Normalize["Normalize cues<br/>typed symbol, text, number, bool values"]
-  Normalize --> Candidates["Fetch bounded candidates<br/>indexed chunk type and cue slots"]
-  Candidates --> Hydrate["Hydrate scoring inputs<br/>practice events, associations, candidate slots"]
-  Hydrate --> Each{"For each candidate"}
+  Request["RetrievalRequest<br/>agent_id, chunk_type, cue_slots, context_chunk_ids, now_ms"] --> Validate["Validate finite params<br/>candidate_limit, threshold, decay, noise, latency factor"]
+  Validate --> Query["Candidate query<br/>normalize cue slots, bound by candidate_limit"]
+  Query --> Fetch["Repository fetch_candidates<br/>indexed chunk type and cue slot filters"]
+  Fetch --> Candidate["ChunkWithHistory<br/>chunk + practice_events + spread_score"]
+  Candidate --> Loop{"Score each candidate"}
 
-  subgraph Score["Activation scoring in nestor-core"]
-    Base["Base level<br/>B = ln(sum(weight * age^-d))"]
-    Spread["Spreading activation<br/>S = sum(source_weight * association_strength)"]
-    Partial["Partial match<br/>P = mismatch_penalty * similarity"]
-    Noise["Noise<br/>deterministic logistic perturbation when enabled"]
-    Total["Activation<br/>A = B + S + P + noise"]
-    Probability["Retrieval probability<br/>1 / (1 + exp((threshold - A) / s))"]
-    Latency["Predicted latency<br/>F * exp(-A)"]
+  subgraph Inputs["Candidate inputs"]
+    Events["Practice events<br/>occurred_at_ms, weight"]
+    SpreadInput["Association summary<br/>precomputed spread_score"]
+    Slots["Candidate slots<br/>compared with cue_slots"]
+    Seed["Optional deterministic_seed<br/>stable per chunk id"]
   end
 
-  Each --> Base
-  Each --> Spread
-  Each --> Partial
-  Each --> Noise
+  subgraph Match["Mismatch policy"]
+    Policy{"Configured policy"}
+    Disabled["Disabled<br/>P = 0"]
+    Exact["Exact<br/>missing or unequal cue slots get -mismatch_penalty"]
+    Partial["Partial<br/>slot similarity in [-1, 0] times mismatch_penalty"]
+  end
+
+  subgraph Activation["Activation calculation"]
+    Base["Base level<br/>B = ln(sum_j weight_j * age_j^-d)"]
+    Spread["Spreading<br/>S = spread_score"]
+    PartialScore["Partial match<br/>P from mismatch policy"]
+    Noise["Noise<br/>N = s * ln(u / (1 - u)); 0 when disabled"]
+    Total["Total activation<br/>A = B + S + P + N"]
+    Pass["Threshold check<br/>passes when A >= retrieval_threshold"]
+    Probability["Probability<br/>noise_s <= 0: hard 0 or 1<br/>else 1 / (1 + exp((threshold - A) / s))"]
+    Latency["Latency<br/>predicted_latency_ms = F * exp(-A)"]
+  end
+
+  Loop --> Events --> Base
+  Loop --> SpreadInput --> Spread
+  Loop --> Slots --> Policy
+  Policy --> Disabled --> PartialScore
+  Policy --> Exact --> PartialScore
+  Policy --> Partial --> PartialScore
+  Loop --> Seed --> Noise
   Base --> Total
   Spread --> Total
-  Partial --> Total
+  PartialScore --> Total
   Noise --> Total
+  Total --> Pass
   Total --> Probability
   Total --> Latency
-  Total --> Threshold{"A >= threshold?"}
 
-  Threshold -->|yes| Rank["Rank hit candidates<br/>activation desc, chunk id tie-break"]
-  Threshold -->|no| Miss["Miss diagnostics<br/>best activation and threshold"]
-  Rank --> Commit["Commit retrieval buffer<br/>record retrieval practice"]
-  Commit --> HitResponse["Hit response<br/>chunk, score components, probability, latency"]
-  Miss --> MissResponse["Miss response<br/>reason, diagnostics, candidate count"]
+  Pass --> Ranked["Rank candidates<br/>activation descending, chunk id ascending"]
+  Ranked --> Best{"Best candidate passes?"}
+  Best -->|yes| Commit["Optional commit_on_hit<br/>set retrieval buffer in repository and session"]
+  Best -->|no candidates| NoCandidates["Miss: no_candidates"]
+  Best -->|below threshold| ThresholdMiss["Miss: threshold<br/>include best_activation"]
+  Commit --> Hit["Hit response<br/>chunk + B/S/P/N/A + probability + latency"]
+  NoCandidates --> Miss["Miss response<br/>diagnostics + candidate_count"]
+  ThresholdMiss --> Miss
 ```
 
 The response preserves the component breakdown as `base_level`, `spreading`,
