@@ -2,34 +2,21 @@
 
 [CLI docs index](./README.md)
 
-Progressive disclosure is a product requirement for this CLI. Agents should see
-only the smallest useful command map at first, then drill into command groups,
-leaf help, and long-form documentation on demand.
-
-This follows Anthropic's agent documentation pattern: keep always-loaded context
-small, use short descriptions to help the model choose the right tool or command,
-and load detailed instructions only when the task calls for them. The practical
-rule here is simple: root help should orient, group help should route, leaf help
-should execute, and long docs should explain.
-
-References:
-
-- [Claude Code skills](https://code.claude.com/docs/en/slash-commands)
-- [Claude tool use overview](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview)
-
-## Discovery Levels
+Nestor CLI help is layered so short command lists stay readable and detailed
+references remain available when needed. Root help orients, group help routes,
+leaf help supports execution, and long-form docs explain workflows.
 
 ## Design Rules
 
-- Root help and `nestor guide commands` are selection surfaces. They should stay
-  compact and avoid long reference material.
-- Command group help is a routing surface. It should name valid subcommands,
-  one-line purposes, and the next 2-3 commands to try.
-- Leaf help is an execution surface. It should include required arguments,
-  defaults, examples, the endpoint, and a relevant docs link.
-- Deep guide pages are reference surfaces. They can include workflow bodies,
-  grammar rules, error recovery, and crosslinks.
-- Every deep page should say when to use it and where to go next.
+- Root help and `nestor guide commands` list the command map and next places to
+  look.
+- Command group help names valid subcommands, one-line purposes, and the next
+  commands to try.
+- Leaf help includes required arguments, defaults, examples, the endpoint, and a
+  relevant docs link.
+- Deep guide pages contain workflow bodies, grammar rules, error recovery, and
+  crosslinks.
+- Every deep page explains when to use it and where to go next.
 
 ## Level 0: Entry Surface
 

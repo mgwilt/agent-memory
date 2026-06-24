@@ -1,6 +1,6 @@
-# Agentic E2E CLI
+# Local Model E2E
 
-Run the full local agentic memory workflow with:
+Run the full local model memory workflow with:
 
 ```sh
 pnpm e2e:agentic
@@ -11,10 +11,10 @@ The command:
 - runs the deterministic Rust HTTP/formula integration test;
 - verifies LM Studio is serving `qwen/qwen3.6-27b` at `http://localhost:1234/v1`;
 - starts the Nestor API on an ephemeral localhost port;
-- asks the local model for a memory-write plan through AI SDK;
+- sends memory-write requests through AI SDK;
 - exercises every HTTP API endpoint;
 - validates created memory, retrieval behavior, production-rule selection, metrics, and retrieval formulas;
-- asks the local model to answer from retrieved memory; and
+- sends answer-generation requests using retrieved memory; and
 - writes run artifacts under `artifacts/e2e-agentic-memory/<timestamp>/`.
 
 Useful overrides:

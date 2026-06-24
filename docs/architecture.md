@@ -1,6 +1,7 @@
 # Architecture Notes
 
-The scaffold follows the engineering plan's hybrid ACT-R design.
+Nestor uses a hybrid ACT-R design with Rust-owned scoring and Memgraph-backed
+persistence.
 
 ## Ownership Boundary
 
@@ -80,9 +81,8 @@ bundle through `NESTOR_MEMGRAPH_TLS_CA_FILE`.
 6. Commit the retrieval buffer on a hit when requested, then return hit or miss
    diagnostics.
 
-This deliberately avoids graph-only ACT-R scoring. The research reports identify
-dynamic activation math and deterministic tests as the reasons to keep scoring in
-Rust.
+This deliberately avoids graph-only ACT-R scoring. Dynamic activation math and
+deterministic tests are the reasons to keep scoring in Rust.
 
 ## Memory System Flow
 
@@ -92,7 +92,7 @@ the Rust memory modules.
 
 ```mermaid
 flowchart TD
-  Agent["Agent or companion app"] --> CLI["nestor CLI"]
+  Agent["CLI user or HTTP client"] --> CLI["nestor CLI"]
   Agent --> HTTP["Nestor HTTP API"]
   CLI --> Client["nestor-client<br/>typed transport"]
   Client --> HTTP

@@ -34,7 +34,7 @@ Text output is the default. JSON-producing commands also support:
 
 ## Corrective Error Pattern
 
-Every error should say what failed and where to go next:
+Every error says what failed and where to go next:
 
 ```text
 [error] invalid slot value "topic=preference"
@@ -43,4 +43,4 @@ Explore: nestor guide slots
 ```
 
 See [Progressive Disclosure](./progressive-disclosure.md) and
-[Testing And Definition Of Done](./testing-and-dod.md).
+[Testing](./testing.md).

@@ -8,7 +8,7 @@ The CLI is split into transport and presentation layers:
 nestor -> nestor-client -> Nestor HTTP API -> Rust service
 ```
 
-`nestor-client` owns typed API operations, URL construction, request serialization,
+`nestor-client` owns typed API operations, URL assembly, request serialization,
 response decoding, timeout handling, and API error classification. It does not
 know about terminals, help text, markdown, or stdout/stderr.
 

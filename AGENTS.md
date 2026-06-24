@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository is a Rust workspace for an ACT-R-inspired memory service backed by Memgraph. Source code lives under `crates/`: `nestor-core` contains pure domain math and types, `nestor-session` owns buffer/session state, `nestor-rules` implements production rules, `nestor-store` contains Memgraph schema and repository code, `nestor-api` defines API DTOs/routes, and `nestor-ops` holds config, health, and metrics helpers. Integration test scaffolding lives in `tests/integration/`, benchmark notes in `benches/`, runtime scripts in `scripts/`, documentation in `docs/`, and research/planning material in `research/` and `.goals/`.
+This repository is a Rust workspace for an ACT-R-inspired memory service backed by Memgraph. Source code lives under `crates/`: `nestor-core` contains pure domain math and types, `nestor-session` owns buffer/session state, `nestor-rules` implements production rules, `nestor-store` contains Memgraph schema and repository code, `nestor-api` defines API DTOs/routes, and `nestor-ops` holds config, health, and metrics helpers. Integration tests live in `tests/integration/`, benchmark notes in `benches/`, runtime scripts in `scripts/`, documentation in `docs/`, and research material in `research/`.
 
 ## Build, Test, and Development Commands
 

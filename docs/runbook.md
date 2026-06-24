@@ -32,10 +32,10 @@ docker compose down
 ## Verification
 
 ```sh
+cargo fmt --all --check
 cargo check --workspace --all-targets
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-.codex/goals/G11-deployment-handoff/verify.sh
 ```
 
 ## Runtime Configuration

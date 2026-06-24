@@ -1,13 +1,13 @@
-# Testing And Definition Of Done
+# Testing
 
 [CLI docs index](./README.md)
 
 ## Test Matrix
 
-- Client operation tests cover method/path/query construction and error mapping.
+- Client operation tests cover method/path/query assembly and error mapping.
 - Parser tests cover every command, slot values, JSON files, and config
   precedence.
-- Help tests verify progressive-disclosure surfaces.
+- Help tests verify CLI discovery surfaces.
 - Integration tests run the compiled CLI against an ephemeral API server.
 - Docs tests validate crosslinks and command coverage.
 
@@ -29,7 +29,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-## Definition Of Done
+## Verification Criteria
 
 - Root help lists all top-level commands.
 - Every API route in `nestor_api::route_manifest()` is covered by CLI integration

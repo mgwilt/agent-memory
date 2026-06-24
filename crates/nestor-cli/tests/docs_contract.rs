@@ -14,7 +14,7 @@ fn cli_docs_crosslinks_and_command_sections_exist() -> TestResult<()> {
         "workflows.md",
         "slots-and-json.md",
         "output-and-errors.md",
-        "testing-and-dod.md",
+        "testing.md",
     ] {
         assert!(readme.contains(page), "README missing {page}");
         let body = fs::read_to_string(docs.join(page))?;

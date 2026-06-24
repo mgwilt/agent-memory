@@ -19,7 +19,7 @@ The live G09 test seeds a bounded retrieval fixture in Memgraph, verifies
 retrieval-relevant association ordering through `mgconsole`, and deletes the
 test agent's graph before returning.
 
-Required scenarios from the research reports:
+Required scenarios:
 
 - schema migration idempotency;
 - chunk create/read/update/delete;

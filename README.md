@@ -1,10 +1,9 @@
 # Nestor
 
-Nestor gives agents a durable memory surface they can use from a terminal,
-local service, or companion app. The primary interface is the `nestor` CLI:
-agents can write facts, retrieve relevant memories, reinforce useful memories,
-connect context, inspect diagnostics, and evaluate simple production rules.
-
+Nestor gives AI systems durable memory through a local CLI, HTTP API, and Docker
+stack. The primary interface is the `nestor` CLI: use it to write facts,
+retrieve relevant memories, reinforce useful memories, connect context, inspect
+diagnostics, and evaluate simple production rules.
 ## What You Can Do
 
 - Store typed memories as chunks with slots.
@@ -33,8 +32,7 @@ cargo run -p nestor-cli -- doctor
 cargo run -p nestor-cli -- guide workflow
 ```
 
-The CLI is intentionally progressive. Start with `nestor guide`, then drill into
-only the command group or workflow you need:
+Start with `nestor guide`, then open the command group or workflow you need:
 
 ```sh
 nestor guide commands
@@ -135,7 +133,7 @@ live in [docs/runbook.md](docs/runbook.md).
 ## Use The API
 
 The CLI is the recommended starting point, but the HTTP API is available for
-companion apps and agent runtimes.
+direct service integrations.
 
 Print the route manifest:
 
@@ -160,9 +158,10 @@ with [docs/cli/commands.md](docs/cli/commands.md),
 [docs/cli/slots-and-json.md](docs/cli/slots-and-json.md), and
 [docs/cli/output-and-errors.md](docs/cli/output-and-errors.md).
 
-## For Agents
+## CLI Discovery
 
-Nestor is designed so agents do not need to load the entire manual up front.
+Nestor keeps common entry points short and routes to deeper help when you need
+exact arguments, examples, or output details.
 
 - Use `nestor guide commands` for a compact command map.
 - Use group help such as `nestor chunk --help` when choosing an action.
@@ -174,7 +173,7 @@ Nestor is designed so agents do not need to load the entire manual up front.
   exit and duration markers.
 
 See [docs/cli/progressive-disclosure.md](docs/cli/progressive-disclosure.md) for
-the progressive-disclosure contract.
+the CLI discovery levels.
 
 ## Technical Documentation
 
@@ -189,8 +188,8 @@ the progressive-disclosure contract.
 - [Runbook](docs/runbook.md): local stack, runtime config, and troubleshooting.
 - [Architecture notes](docs/architecture.md): ownership boundaries, memory flow,
   scoring diagrams, runtime profiles, and observability.
-- [Agentic E2E CLI](docs/agentic-e2e-cli.md): LM Studio and local-model
-  integration workflow.
+- [Local model E2E](docs/local-model-e2e.md): LM Studio and local-model
+  workflow.
 
 ## Development Checks
 

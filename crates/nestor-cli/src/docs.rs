@@ -6,7 +6,7 @@ pub const DOC_INDEX: &str = "CLI docs:
   docs/cli/workflows.md
   docs/cli/slots-and-json.md
   docs/cli/output-and-errors.md
-  docs/cli/testing-and-dod.md
+  docs/cli/testing.md
 
 Command mapping:
   chunk      docs/cli/commands.md#chunk

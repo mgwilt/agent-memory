@@ -1,8 +1,8 @@
 # Nestor CLI
 
-The `nestor` CLI is the agent-friendly command surface for the Nestor memory
-API. It keeps the first help screen compact, then exposes deeper command,
-workflow, slot, and error documentation only when requested.
+The `nestor` CLI is the command surface for the Nestor memory API. It starts
+with a compact command map, then points to command, workflow, slot, and error
+details as needed.
 
 Shortest path:
 
@@ -20,10 +20,10 @@ nestor guide workflow
 - [Workflows](./workflows.md)
 - [Slots And JSON](./slots-and-json.md)
 - [Output And Errors](./output-and-errors.md)
-- [Testing And Definition Of Done](./testing-and-dod.md)
+- [Testing](./testing.md)
 
 Related repository docs:
 
 - [System architecture](../architecture.md)
 - [Runbook](../runbook.md)
-- [Agentic E2E CLI](../agentic-e2e-cli.md)
+- [Local Model E2E](../local-model-e2e.md)
