@@ -353,7 +353,7 @@ fn bounded_practice_history(
     candidate: &ChunkWithHistory,
 ) -> (Vec<PracticeEvent>, PracticeInputDiagnostics) {
     let mut events = candidate.practice_events.clone();
-    events.sort_by(|left, right| right.occurred_at_ms.cmp(&left.occurred_at_ms));
+    events.sort_by_key(|event| std::cmp::Reverse(event.occurred_at_ms));
     let total_practice_event_count = events.len();
     let exact_practice_event_count = total_practice_event_count.min(MAX_EXACT_PRACTICE_EVENTS);
     let mut activation_events = events
