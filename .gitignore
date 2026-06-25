@@ -24,7 +24,9 @@ target/
 *.rs.bk
 *.profraw
 *.profdata
-coverage/
+coverage/*
+!coverage/
+!coverage/baseline.json
 lcov.info
 cobertura.xml
 tarpaulin-report.html
@@ -44,6 +46,8 @@ flamegraph.svg
 /test-results/
 /artifacts/
 node_modules/
+.venv/
+__pycache__/
 
 # Secrets and machine-local config.
 .env
