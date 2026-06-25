@@ -1,0 +1,32 @@
+{
+  "cargo_llvm_cov_version": "0.8.7",
+  "coverage_backend": "cargo llvm-cov",
+  "coverage_command": "cargo llvm-cov --workspace --all-targets --json --output-path target/coverage/coverage.json",
+  "schema_version": 1,
+  "scope": "crates/*/src/**/*.rs",
+  "thresholds": {
+    "changed_line_percent": 90.0,
+    "small_change_line_limit": 10,
+    "small_change_max_uncovered": 1,
+    "workspace_max_percent_drop": 0.2,
+    "workspace_max_uncovered_line_increase": 5
+  },
+  "totals": {
+    "functions": {
+      "count": 1018,
+      "covered": 711,
+      "percent": 69.8428
+    },
+    "lines": {
+      "count": 7429,
+      "covered": 5897,
+      "percent": 79.3781
+    },
+    "regions": {
+      "count": 10233,
+      "covered": 7566,
+      "percent": 73.9373
+    },
+    "uncovered_lines": 1532
+  }
+}

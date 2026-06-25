@@ -1,11 +1,22 @@
 pre-commit:
   parallel: false
   commands:
-    fmt:
+    01-fmt:
       run: cargo fmt --all --check
-    check:
+    02-check:
       run: cargo check --workspace --all-targets
-    clippy:
+    03-clippy:
       run: cargo clippy --workspace --all-targets -- -D warnings
-    test:
+    04-test:
       run: cargo test --workspace
+    05-python-lint:
+      run: uv run --locked ruff check scripts
+    06-python-format:
+      run: uv run --locked ruff format --check scripts
+    07-python-typecheck:
+      run: uv run --locked ty check scripts
+    08-python-test:
+      run: uv run --locked python -m unittest discover -s scripts -p '*_test.py'
+    09-rust-coverage:
+      glob: "crates/*/src/**.rs"
+      run: uv run --locked python scripts/check_rust_coverage.py --staged
